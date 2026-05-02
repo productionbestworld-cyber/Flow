@@ -71,7 +71,7 @@ export default function Warehouse() {
       wasteQty:  grdLogs.reduce((s, g) => s + (g.log?.waste_qty  ?? 0), 0),
     } : null
     // printing รับ = ม้วนดีจากเป่า + ที่กรอคืนมา
-    const prtInputQty = (ext.goodQty ?? 0) + (grd?.goodQty ?? 0) || prtJob?.planned_qty ?? 0
+    const prtInputQty = ((ext.goodQty ?? 0) + (grd?.goodQty ?? 0)) || (prtJob?.planned_qty ?? 0)
     const prt = prtJob ? {
       inputQty:  prtInputQty,
       goodQty:   prtLog?.good_qty,
@@ -85,9 +85,6 @@ export default function Warehouse() {
     return { ext, grd, prt, totalLoss }
   }
 
-  function getLastLog(jobId: string) {
-    return logs?.find(l => l.planning_job_id === jobId)
-  }
 
   function openReceive(j: PlanningJob) {
     setReceiveModal(j)
@@ -149,13 +146,6 @@ export default function Warehouse() {
     }
   }
 
-  function addStockSupplement() {
-    if (!suppStockId || !suppQty || parseFloat(suppQty) <= 0) return
-    const st = goodStock.find(s => s.id === suppStockId)
-    setSupplements(prev => [...prev.filter(s => s.stock_id !== suppStockId), { stock_id: suppStockId, qty: parseFloat(suppQty), label: st?.lot_no ?? suppStockId }])
-    setSuppStockId('')
-    setSuppQty('')
-  }
 
   function addManualSupplement() {
     const qty = parseFloat(manualQty)
@@ -289,9 +279,9 @@ export default function Warehouse() {
                       {ext.goodQty   != null && <div className="flex justify-between"><span className="text-green-400">✓ เป่าได้{ext.goodRolls ? ` ${ext.goodRolls} ม้วน` : ''}</span><span className="text-green-300">{formatNumber(ext.goodQty)} {unit}</span></div>}
                       {ext.badQty > 0 && <div className="flex justify-between text-slate-500"><span>⚙ กรอคืน</span><span>+{formatNumber(grd?.goodQty ?? 0)} {unit}</span></div>}
                       {ext.wasteQty > 0 && <div className="flex justify-between text-red-400"><span>✗ เศษเป่า</span><span>{formatNumber(ext.wasteQty)} {unit}</span></div>}
-                      {grd?.wasteQty > 0 && <div className="flex justify-between text-red-400"><span>✗ เศษกรอ</span><span>{formatNumber(grd.wasteQty)} {unit}</span></div>}
+                      {grd && grd.wasteQty > 0 && <div className="flex justify-between text-red-400"><span>✗ เศษกรอ</span><span>{formatNumber(grd.wasteQty)} {unit}</span></div>}
                       {prt && <div className="flex justify-between"><span className="text-purple-400">🖨 พิมพ์ได้{prt.goodRolls ? ` ${prt.goodRolls} ม้วน` : ''}</span><span className="text-green-300">{formatNumber(prt.goodQty ?? 0)} {unit}</span></div>}
-                      {prt?.wasteQty > 0 && <div className="flex justify-between text-red-400"><span>✗ เศษพิม</span><span>{formatNumber(prt.wasteQty)} {unit}</span></div>}
+                      {prt && prt.wasteQty > 0 && <div className="flex justify-between text-red-400"><span>✗ เศษพิม</span><span>{formatNumber(prt.wasteQty)} {unit}</span></div>}
                       {totalLoss > 0 && <div className="flex justify-between text-red-400 border-t border-slate-700 pt-1 font-medium"><span>รวมเสีย</span><span>{formatNumber(totalLoss)} {unit}</span></div>}
                     </div>
                   )}
@@ -372,9 +362,9 @@ export default function Warehouse() {
                       {ext.goodQty   != null && <div className="flex justify-between"><span className="text-green-400">✓ เป่าได้{ext.goodRolls ? ` ${ext.goodRolls} ม้วน` : ''}</span><span className="text-green-300">{formatNumber(ext.goodQty)} {unit}</span></div>}
                       {ext.badQty > 0 && <div className="flex justify-between text-slate-500"><span>⚙ กรอคืน</span><span>+{formatNumber(grd?.goodQty ?? 0)} {unit}</span></div>}
                       {ext.wasteQty > 0 && <div className="flex justify-between text-red-400"><span>✗ เศษเป่า</span><span>{formatNumber(ext.wasteQty)} {unit}</span></div>}
-                      {grd?.wasteQty > 0 && <div className="flex justify-between text-red-400"><span>✗ เศษกรอ</span><span>{formatNumber(grd.wasteQty)} {unit}</span></div>}
+                      {grd && grd.wasteQty > 0 && <div className="flex justify-between text-red-400"><span>✗ เศษกรอ</span><span>{formatNumber(grd.wasteQty)} {unit}</span></div>}
                       {prt && <div className="flex justify-between"><span className="text-purple-400">🖨 พิมพ์ได้{prt.goodRolls ? ` ${prt.goodRolls} ม้วน` : ''}</span><span className="text-green-300">{formatNumber(prt.goodQty ?? 0)} {unit}</span></div>}
-                      {prt?.wasteQty > 0 && <div className="flex justify-between text-red-400"><span>✗ เศษพิม</span><span>{formatNumber(prt.wasteQty)} {unit}</span></div>}
+                      {prt && prt.wasteQty > 0 && <div className="flex justify-between text-red-400"><span>✗ เศษพิม</span><span>{formatNumber(prt.wasteQty)} {unit}</span></div>}
                       {totalLoss > 0 && <div className="flex justify-between text-red-400 border-t border-slate-700 pt-1 font-medium"><span>รวมเสีย</span><span>{formatNumber(totalLoss)} {unit}</span></div>}
                     </div>
                   )}
@@ -397,7 +387,7 @@ export default function Warehouse() {
               const soId    = j.sale_order_id
               const soPlanned = j.sale_order?.qty ?? j.planned_qty
               const { ext, grd, prt, totalLoss } = getSoProductionSummary(soId)
-              const finalGoodQty   = prt?.goodQty ?? ((ext.goodQty ?? 0) + (grd?.goodQty ?? 0)) || j.planned_qty
+              const finalGoodQty   = prt?.goodQty ?? ((ext.goodQty ?? 0) + (grd?.goodQty ?? 0)) || (j.planned_qty ?? 0)
               const extRolls = (ext.goodRolls ?? 0) + (grd?.goodRolls ?? 0)
               const finalGoodRolls = prt?.goodRolls ?? (extRolls > 0 ? extRolls : undefined)
               return (
@@ -505,7 +495,6 @@ export default function Warehouse() {
         // คำนวณยอดจาก items จริง (ไม่รวม placeholder)
         const getDispatchedQty = (r: typeof dispatchedReqs[0]) => {
           const items: { stock_id: string; qty: number }[] = (r as any).items ?? []
-          const real = items.filter(i => i.stock_id !== '__stock_portion__' && !i.stock_id.startsWith('manual-'))
           // ถ้ามี real items ใช้ยอดจาก SO qty (เพราะ items เก็บ stock_id ไม่ใช่ qty จริง)
           return r.sale_order?.qty ?? 0
         }
