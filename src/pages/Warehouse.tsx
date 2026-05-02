@@ -24,8 +24,7 @@ export default function Warehouse() {
   const [location, setLocation] = useState('')
   const [dispatchModal, setDispatchModal] = useState<Requisition | null>(null)
   const [supplements, setSupplements] = useState<{ stock_id: string; qty: number; label: string }[]>([])
-  const [suppStockId, setSuppStockId] = useState('')
-  const [suppQty, setSuppQty] = useState('')
+
   const [manualQty, setManualQty] = useState('')
 
   // แสดงแค่ job สุดท้ายต่อ SO (printing > extrusion — ไม่รวม grinding)
@@ -119,8 +118,7 @@ export default function Warehouse() {
 
   function openDispatchModal(r: Requisition) {
     setDispatchModal(r)
-    setSuppStockId('')
-    setSuppQty('')
+
     setManualQty('')
 
     // ถ้าเป็นใบเบิกส่วนสต็อก → auto-รวม production lot + ยอดสต็อกจาก SO
@@ -387,7 +385,7 @@ export default function Warehouse() {
               const soId    = j.sale_order_id
               const soPlanned = j.sale_order?.qty ?? j.planned_qty
               const { ext, grd, prt, totalLoss } = getSoProductionSummary(soId)
-              const finalGoodQty   = prt?.goodQty ?? ((ext.goodQty ?? 0) + (grd?.goodQty ?? 0)) || (j.planned_qty ?? 0)
+              const finalGoodQty   = (prt?.goodQty ?? ((ext.goodQty ?? 0) + (grd?.goodQty ?? 0))) || (j.planned_qty ?? 0)
               const extRolls = (ext.goodRolls ?? 0) + (grd?.goodRolls ?? 0)
               const finalGoodRolls = prt?.goodRolls ?? (extRolls > 0 ? extRolls : undefined)
               return (
@@ -494,7 +492,6 @@ export default function Warehouse() {
       {dispatchedReqs.length > 0 && (() => {
         // คำนวณยอดจาก items จริง (ไม่รวม placeholder)
         const getDispatchedQty = (r: typeof dispatchedReqs[0]) => {
-          const items: { stock_id: string; qty: number }[] = (r as any).items ?? []
           // ถ้ามี real items ใช้ยอดจาก SO qty (เพราะ items เก็บ stock_id ไม่ใช่ qty จริง)
           return r.sale_order?.qty ?? 0
         }

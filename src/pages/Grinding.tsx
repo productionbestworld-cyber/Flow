@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Clock, Cog, Plus } from 'lucide-react'
+import { Clock, Plus } from 'lucide-react'
 import { usePlanningJobs, useAssignMachine, useUnassignMachine } from '../hooks/usePlanning'
 import { useProductionLogs } from '../hooks/useProduction'
 import ProductionJobCard from '../components/shared/ProductionJobCard'

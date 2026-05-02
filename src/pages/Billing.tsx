@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { Plus, FileText, CheckCircle, X, Printer } from 'lucide-react'
+import { Plus, FileText, X, Printer } from 'lucide-react'
 import { useInvoices, useCreateInvoice, useUpdateInvoiceStatus } from '../hooks/useBilling'
 import { useRequisitions } from '../hooks/useSales'
 import { useSaleOrders } from '../hooks/useSaleOrders'
@@ -16,7 +16,7 @@ function PrintInvoiceModal({ inv, onClose }: { inv: Invoice; onClose: () => void
   const qty      = so?.qty ?? 0
   const unit     = so?.unit ?? 'kg'
   const unitPrice = qty > 0 ? inv.amount / qty : 0
-  const today    = new Date().toLocaleDateString('th-TH', { day: '2-digit', month: '2-digit', year: 'numeric' })
+
   const invoiceNo = `INV-${inv.id.slice(0,8).toUpperCase()}`
 
   function handlePrint() {
@@ -275,7 +275,7 @@ function numberToThaiText(n: number): string {
   const f = Math.floor(n)
   const d = Math.round((n - f) * 100)
   const ones = ['', 'หนึ่ง', 'สอง', 'สาม', 'สี่', 'ห้า', 'หก', 'เจ็ด', 'แปด', 'เก้า']
-  const tens = ['', 'สิบ', 'ยี่สิบ', 'สามสิบ', 'สี่สิบ', 'ห้าสิบ', 'หกสิบ', 'เจ็ดสิบ', 'แปดสิบ', 'เก้าสิบ']
+
   function u(x: number): string {
     if (x === 0) return 'ศูนย์'
     const parts: string[] = []
@@ -359,11 +359,7 @@ export default function Billing() {
     setPrintInv(inv)
   }
 
-  async function handleStatus(inv: Invoice, status: Invoice['status']) {
-    const labels: Record<string, string> = { cancelled: 'ยกเลิก' }
-    if (!confirm(`${labels[status] ?? status}?`)) return
-    await updateStatus.mutateAsync({ id: inv.id, status })
-  }
+
 
   return (
     <div className="p-6 space-y-6">

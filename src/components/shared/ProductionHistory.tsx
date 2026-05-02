@@ -137,7 +137,7 @@ export default function ProductionHistory({ dept, jobs, logs }: Props) {
                 {/* Process detail — accordion */}
                 {isOpen && (
                   <div className="bg-slate-800/30 border-t border-slate-800/60 px-5 py-4 space-y-3">
-                    {soJobs.map((job, idx) => {
+                    {soJobs.map((job) => {
                       const log = logs.find(l => l.planning_job_id === job.id)
                       const goodQty   = log?.good_qty   ?? 0
                       const goodRolls = log?.good_rolls  ?? 0

@@ -1,8 +1,8 @@
 import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, ShoppingCart, ClipboardList, Wind,
-  Printer, Warehouse, TrendingUp, Receipt, Users,
-  Package, Settings, ChevronLeft, ChevronRight, LogOut,
+  Printer, Warehouse, TrendingUp, Receipt,
+  Settings, ChevronLeft, ChevronRight, LogOut,
   Cog, Activity,
 } from 'lucide-react'
 import { cn } from '../lib/utils'

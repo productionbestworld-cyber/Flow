@@ -118,8 +118,6 @@ function soToForm(o: SaleOrder): FormState {
     customer_id:      o.customer_id,
     product_id:       o.product_id,
     so_no:            o.so_no ?? '',
-    customer_id:      o.customer_id,
-    product_id:       o.product_id,
     item_code:        o.item_code ?? o.product?.item_code ?? '',
     mat_code:         o.mat_code ?? '',
     po_no:            o.po_no ?? '',
@@ -465,7 +463,7 @@ export default function SaleOrder() {
   const [editing, setEditing] = useState<SaleOrder | null>(null)
   const [form, setForm]       = useState<FormState>({ ...DEFAULT_FORM })
   const [saving, setSaving]   = useState(false)
-  const [creatingSample, setCreatingSample] = useState(false)
+
   const [error, setError]     = useState('')
   const [printingSO, setPrintingSO] = useState<SaleOrder | null>(null)
   const [csvRows, setCsvRows]       = useState<Record<string,string>[]>([])
@@ -633,50 +631,7 @@ export default function SaleOrder() {
     await deleteOrder.mutateAsync(o.id)
   }
 
-  async function createSampleOrders() {
-    if (!customers?.length) {
-      alert('ต้องมีลูกค้าอย่างน้อย 1 รายการก่อนสร้าง SO จำลอง')
-      return
-    }
 
-    const clearProduct = products?.find(p => p.type === 'blow')
-    const printProduct = products?.find(p => p.type === 'print')
-    if (!clearProduct || !printProduct) {
-      alert('ต้องมีสินค้า blow และ print อย่างละ 1 รายการก่อนสร้าง SO จำลอง')
-      return
-    }
-
-    const customer = customers[0]
-    const today = new Date().toISOString().slice(0, 10)
-    setCreatingSample(true)
-    try {
-      await createOrder.mutateAsync({
-        customer_id: customer.id,
-        product_id: clearProduct.id,
-        item_code: clearProduct.item_code,
-        qty: 1,
-        unit: clearProduct.unit,
-        delivery_date: today,
-        remark: 'จำลองม้วนใส',
-        status: 'draft',
-      })
-      await createOrder.mutateAsync({
-        customer_id: customer.id,
-        product_id: printProduct.id,
-        item_code: printProduct.item_code,
-        qty: 1,
-        unit: printProduct.unit,
-        delivery_date: today,
-        remark: 'จำลองม้วนพิม',
-        status: 'draft',
-      })
-    } catch (error) {
-      console.error(error)
-      alert(`สร้าง SO จำลองล้มเหลว: ${error instanceof Error ? error.message : JSON.stringify(error)}`)
-    } finally {
-      setCreatingSample(false)
-    }
-  }
 
   return (
     <div className="p-6">

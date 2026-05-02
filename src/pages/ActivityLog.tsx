@@ -8,7 +8,7 @@ import { usePlanningJobs } from '../hooks/usePlanning'
 import { useProductionLogs } from '../hooks/useProduction'
 import { useWarehouseStock } from '../hooks/useWarehouse'
 import { useRequisitions } from '../hooks/useSales'
-import { formatDate, formatNumber, cn } from '../lib/utils'
+import { formatNumber, cn } from '../lib/utils'
 import StatusBadge from '../components/shared/StatusBadge'
 
 // ─── Event ────────────────────────────────────────────────────────────────────
@@ -69,7 +69,7 @@ export default function ActivityLog() {
     so_no: string
     customer: string
     product: string
-    status: string
+    status: any
     qty: number
     unit: string
     lastActivity: string

@@ -83,7 +83,7 @@ export default function Sales() {
         // จัดกลุ่ม lot ตาม SO no
         type StockGroup = { soNo: string; soId?: string; productName: string; unit: string; lots: typeof goodStock; totalQty: number }
         const groups: StockGroup[] = []
-        const seen = new Set<string>()
+
 
         goodStock.forEach(s => {
           // หา SO จาก planning_job หรือ lot_no prefix STK-{so_no}-
