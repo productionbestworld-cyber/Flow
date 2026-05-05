@@ -62,7 +62,7 @@ export interface SaleOrder {
   item_code?: string
   mat_code?: string
   // spec fields
-  grade?: 'A' | 'B'
+  grade?: 'A' | 'B' | 'PCR'
   job_type?: string
   weight_per_roll?: number
   core_type?: 'pvc' | 'paper'

@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Clock, Plus } from 'lucide-react'
+import { Clock, Plus, Download, FileText } from 'lucide-react'
+import { downloadCSV, printDocument } from '../lib/csvUtils'
 import { usePlanningJobs, useAssignMachine, useUnassignMachine } from '../hooks/usePlanning'
 import { useProductionLogs } from '../hooks/useProduction'
 import ProductionJobCard from '../components/shared/ProductionJobCard'
@@ -47,11 +48,61 @@ export default function Grinding() {
     await unassignMachine.mutateAsync({ id: jobId })
   }
 
+  const deptJobs = jobs?.filter(j => j.dept === 'grinding') ?? []
+
+  function handleExport() {
+    const headers = ['Lot No.','SO No.','ลูกค้า','สินค้า','เครื่อง','รับม้วนกรอ (kg)','กรอคืน (ม้วน)','กรอคืน (kg)','เศษสแคป (kg)','สถานะ']
+    const rows = deptJobs.map(j => {
+      const log = grdLogs?.find(l => l.planning_job_id === j.id)
+      return [j.lot_no ?? '', j.sale_order?.so_no ?? '', j.sale_order?.customer?.name ?? '',
+        j.sale_order?.product?.part_name ?? '', j.machine_no ?? '',
+        j.planned_qty, log?.good_rolls ?? '', log?.good_qty ?? '', log?.waste_qty ?? '', j.status]
+    })
+    downloadCSV(`grinding_log_${new Date().toISOString().slice(0,10)}.csv`, headers, rows)
+  }
+
+  function handlePrint() {
+    const date = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })
+    printDocument('บันทึกการผลิต Grinding', `
+      <h1>บันทึกการผลิต Grinding</h1>
+      <p class="meta">วันที่พิมพ์: ${date} · รวม ${deptJobs.length} งาน</p>
+      <table>
+        <thead><tr>
+          <th>Lot No.</th><th>SO</th><th>ลูกค้า</th><th>สินค้า</th><th>เครื่อง</th>
+          <th>รับกรอ (kg)</th><th>คืน (ม้วน)</th><th>คืน (kg)</th><th>เศษ (kg)</th><th>สถานะ</th>
+        </tr></thead>
+        <tbody>${deptJobs.map(j => {
+          const log = grdLogs?.find(l => l.planning_job_id === j.id)
+          return `<tr>
+            <td>${j.lot_no ?? ''}</td><td>${j.sale_order?.so_no ?? ''}</td>
+            <td>${j.sale_order?.customer?.name ?? ''}</td><td>${j.sale_order?.product?.part_name ?? ''}</td>
+            <td>${j.machine_no ?? '-'}</td>
+            <td style="text-align:right">${(j.planned_qty ?? 0).toLocaleString()}</td>
+            <td style="text-align:right">${log?.good_rolls ?? '-'}</td>
+            <td style="text-align:right">${log?.good_qty?.toLocaleString() ?? '-'}</td>
+            <td style="text-align:right">${log?.waste_qty?.toLocaleString() ?? '-'}</td>
+            <td>${j.status}</td>
+          </tr>`
+        }).join('')}</tbody>
+      </table>
+    `)
+  }
+
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-xl font-bold text-white">Grinding</h1>
-        <p className="text-slate-400 text-sm mt-0.5">บันทึกข้อมูลการผลิต Grinding</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-bold text-white">Grinding</h1>
+          <p className="text-slate-400 text-sm mt-0.5">บันทึกข้อมูลการผลิต Grinding</p>
+        </div>
+        <div className="flex items-center gap-2 no-print">
+          <button onClick={handleExport} className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white text-sm px-3 py-2 rounded-lg transition-colors">
+            <Download size={15} /> Export
+          </button>
+          <button onClick={handlePrint} className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white text-sm px-3 py-2 rounded-lg transition-colors">
+            <FileText size={15} /> พิมพ์
+          </button>
+        </div>
       </div>
 
       <DeptDashboard dept="grinding" jobs={jobs ?? []} logs={grdLogs ?? []} />

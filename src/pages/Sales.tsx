@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Truck, X, Package, Clock, ShoppingCart, CheckCircle2 } from 'lucide-react'
+import { Truck, X, Package, Clock, ShoppingCart, CheckCircle2, Download, FileText } from 'lucide-react'
+import { downloadCSV, printDocument } from '../lib/csvUtils'
 import { useRequisitions, useCreateRequisition } from '../hooks/useSales'
 import { useSaleOrders } from '../hooks/useSaleOrders'
 import { useWarehouseStock } from '../hooks/useWarehouse'
@@ -61,6 +62,48 @@ export default function Sales() {
         <div>
           <h1 className="text-xl font-bold text-white">Sales</h1>
           <p className="text-slate-400 text-sm mt-0.5">จัดการใบเบิกสินค้า (Requisition)</p>
+        </div>
+        <div className="flex items-center gap-2 no-print">
+          <button
+            onClick={() => {
+              const headers = ['เลขที่ใบเบิก','SO No.','ลูกค้า','สินค้า','จำนวน','หน่วย','วันที่สร้าง','สถานะ']
+              const rows = (reqs ?? []).map(r => [
+                r.id.slice(0,8), r.sale_order?.so_no ?? '', r.sale_order?.customer?.name ?? '',
+                r.sale_order?.product?.part_name ?? '', r.sale_order?.qty ?? '',
+                r.sale_order?.unit ?? '', formatDate(r.created_at), r.status,
+              ])
+              downloadCSV(`requisitions_${new Date().toISOString().slice(0,10)}.csv`, headers, rows)
+            }}
+            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white text-sm px-3 py-2 rounded-lg transition-colors"
+          >
+            <Download size={15} /> Export
+          </button>
+          <button
+            onClick={() => {
+              const date = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })
+              printDocument('รายงานใบเบิกสินค้า', `
+                <h1>รายงานใบเบิกสินค้า</h1>
+                <p class="meta">วันที่พิมพ์: ${date} · รวม ${(reqs ?? []).length} ใบ</p>
+                <table>
+                  <thead><tr>
+                    <th>SO No.</th><th>ลูกค้า</th><th>สินค้า</th><th>จำนวน</th><th>หน่วย</th><th>วันที่</th><th>สถานะ</th>
+                  </tr></thead>
+                  <tbody>${(reqs ?? []).map(r => `<tr>
+                    <td>${r.sale_order?.so_no ?? '-'}</td>
+                    <td>${r.sale_order?.customer?.name ?? '-'}</td>
+                    <td>${r.sale_order?.product?.part_name ?? '-'}</td>
+                    <td style="text-align:right">${formatNumber(r.sale_order?.qty ?? 0)}</td>
+                    <td>${r.sale_order?.unit ?? 'kg'}</td>
+                    <td>${formatDate(r.created_at)}</td>
+                    <td>${r.status}</td>
+                  </tr>`).join('')}</tbody>
+                </table>
+              `)
+            }}
+            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white text-sm px-3 py-2 rounded-lg transition-colors"
+          >
+            <FileText size={15} /> พิมพ์
+          </button>
         </div>
       </div>
 

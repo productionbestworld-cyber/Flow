@@ -20,6 +20,12 @@ body {
   min-height: 100vh;
 }
 
+@media print {
+  .no-print { display: none !important; }
+  aside, nav { display: none !important; }
+  body { background: #fff !important; color: #111 !important; }
+}
+
 @layer utilities {
   .scrollbar-thin {
     scrollbar-width: thin;

@@ -114,7 +114,7 @@ export default function Settings() {
                 { menu: 'Dashboard',     roles: ['admin','planner','operator','warehouse','sales'] },
                 { menu: 'Sale Order',    roles: ['admin','sales'] },
                 { menu: 'Planning',      roles: ['admin','planner'] },
-                { menu: 'Extrusion',     roles: ['admin','operator'] },
+                { menu: 'Blow',          roles: ['admin','operator'] },
                 { menu: 'Printing',      roles: ['admin','operator'] },
                 { menu: 'Grinding',      roles: ['admin','operator'] },
                 { menu: 'คลังสินค้า',   roles: ['admin','warehouse'] },

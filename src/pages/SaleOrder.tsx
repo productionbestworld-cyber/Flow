@@ -78,6 +78,48 @@ function extractSize(width?: number, thickness?: number): string {
   return '-'
 }
 
+// ─── Remark color helpers ─────────────────────────────────────────────────────
+
+const REMARK_COLORS = [
+  { key: 'RED',    label: 'ด่วน',    bg: 'bg-red-500/20',    border: 'border-red-500/50',    text: 'text-red-300',    dot: 'bg-red-500'    },
+  { key: 'ORANGE', label: 'ระวัง',   bg: 'bg-orange-500/20', border: 'border-orange-500/50', text: 'text-orange-300', dot: 'bg-orange-500' },
+  { key: 'YELLOW', label: 'แจ้งเตือน', bg: 'bg-yellow-500/20', border: 'border-yellow-500/50', text: 'text-yellow-300', dot: 'bg-yellow-400' },
+  { key: 'GREEN',  label: 'ปกติ',    bg: 'bg-green-500/20',  border: 'border-green-500/50',  text: 'text-green-300',  dot: 'bg-green-500'  },
+  { key: 'BLUE',   label: 'ข้อมูล',  bg: 'bg-blue-500/20',   border: 'border-blue-500/50',   text: 'text-blue-300',   dot: 'bg-blue-500'   },
+  { key: 'PURPLE', label: 'พิเศษ',   bg: 'bg-purple-500/20', border: 'border-purple-500/50', text: 'text-purple-300', dot: 'bg-purple-500' },
+] as const
+
+type RemarkColorKey = typeof REMARK_COLORS[number]['key'] | ''
+
+function parseRemark(raw: string | undefined | null): { color: RemarkColorKey; text: string } {
+  if (!raw) return { color: '', text: '' }
+  const match = raw.match(/^\[([A-Z]+)\](.*)$/s)
+  if (match) {
+    const key = match[1] as RemarkColorKey
+    if (REMARK_COLORS.some(c => c.key === key)) return { color: key, text: match[2].trim() }
+  }
+  return { color: '', text: raw }
+}
+
+function encodeRemark(color: RemarkColorKey, text: string): string {
+  if (!text.trim()) return ''
+  return color ? `[${color}]${text}` : text
+}
+
+function RemarkBadge({ raw, className }: { raw?: string | null; className?: string }) {
+  const { color, text } = parseRemark(raw)
+  if (!text) return null
+  const cfg = REMARK_COLORS.find(c => c.key === color)
+  if (!cfg) return <span className={cn('text-xs text-slate-400', className)}>{text}</span>
+  return (
+    <span className={cn('inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full border', cfg.bg, cfg.border, cfg.text, className)}>
+      <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', cfg.dot)} />
+      <span className="font-medium">{cfg.label}</span>
+      <span className="opacity-80">{text}</span>
+    </span>
+  )
+}
+
 // ─── Default form values ──────────────────────────────────────────────────────
 
 const DEFAULT_FORM = {
@@ -92,7 +134,8 @@ const DEFAULT_FORM = {
   unit: 'kg',
   delivery_date: '',
   remark: '',
-  grade: '' as '' | 'A' | 'B',
+  remarkColor: '' as RemarkColorKey,
+  grade: '' as '' | 'A' | 'B' | 'PCR',
   job_type: '',
   width: '',
   thickness: '',
@@ -105,10 +148,10 @@ const DEFAULT_FORM = {
   joint_red_tape: false,
   joint_count: false,
   cover_sheet: '' as '' | 'short' | 'long',
+  on_pallet: false,
   pallet_type: '' as '' | 'wood' | 'loscam' | 'plastic',
   pallet_qty: '',
   rolls_per_pallet: '',
-  stock_qty: '',
 }
 
 type FormState = typeof DEFAULT_FORM
@@ -125,7 +168,8 @@ function soToForm(o: SaleOrder): FormState {
     qty:              o.qty.toString(),
     unit:             o.unit,
     delivery_date:    o.delivery_date ?? '',
-    remark:           o.remark ?? '',
+    remark:           parseRemark(o.remark).text,
+    remarkColor:      parseRemark(o.remark).color,
     grade:            o.grade ?? '',
     job_type:         o.job_type ?? '',
     width:            o.product?.width?.toString() ?? '',
@@ -139,10 +183,10 @@ function soToForm(o: SaleOrder): FormState {
     joint_red_tape:   o.joint_red_tape ?? false,
     joint_count:      o.joint_count ?? false,
     cover_sheet:      o.cover_sheet ?? '',
+    on_pallet:        !!o.pallet_type,
     pallet_type:      o.pallet_type ?? '',
     pallet_qty:       o.pallet_qty?.toString() ?? '',
     rolls_per_pallet: o.rolls_per_pallet?.toString() ?? '',
-    stock_qty:        o.stock_qty?.toString() ?? '',
   }
 }
 
@@ -157,7 +201,7 @@ function formToPayload(f: FormState, userId?: string) {
     qty:           parseFloat(f.qty),
     unit:          f.unit,
     delivery_date: f.delivery_date || undefined,
-    remark:        f.remark || undefined,
+    remark:        encodeRemark(f.remarkColor, f.remark) || undefined,
     created_by:    userId,
   }
   // spec fields — ส่งเฉพาะตัวที่มีค่า เพื่อหลีกเลี่ยง 400 ถ้า column ยังไม่ได้สร้าง
@@ -173,10 +217,9 @@ function formToPayload(f: FormState, userId?: string) {
   if (f.joint_red_tape)   spec.joint_red_tape   = f.joint_red_tape
   if (f.joint_count)      spec.joint_count      = f.joint_count
   if (f.cover_sheet)      spec.cover_sheet      = f.cover_sheet
-  if (f.pallet_type)      spec.pallet_type      = f.pallet_type
-  if (num(f.pallet_qty))       spec.pallet_qty       = num(f.pallet_qty)
-  if (num(f.rolls_per_pallet)) spec.rolls_per_pallet = num(f.rolls_per_pallet)
-  if (num(f.stock_qty))        spec.stock_qty        = num(f.stock_qty)
+  if (f.on_pallet && f.pallet_type)           spec.pallet_type      = f.pallet_type
+  if (f.on_pallet && num(f.pallet_qty))       spec.pallet_qty       = num(f.pallet_qty)
+  if (f.on_pallet && num(f.rolls_per_pallet)) spec.rolls_per_pallet = num(f.rolls_per_pallet)
   return { ...base, ...spec }
 }
 
@@ -335,20 +378,10 @@ function PrintSOModal({ so, onClose }: { so: SaleOrder; onClose: () => void }) {
             </div>
 
             {/* ── จำนวน (top summary) ── */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', border: '1.5px solid #111', marginBottom: 14, textAlign: 'center' }}>
-              <div style={{ padding: '10px 8px', borderRight: '1px solid #111' }}>
-                <div style={{ fontSize: 9, color: '#888', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>สต็อกที่มีอยู่</div>
-                <div style={{ fontSize: 22, fontWeight: 800 }}>{formatNumber(so.stock_qty ?? 0)}</div>
-                <div style={{ fontSize: 10, color: '#aaa' }}>{unit}</div>
-              </div>
-              <div style={{ padding: '10px 8px', borderRight: '1px solid #111' }}>
+            <div style={{ border: '1.5px solid #111', marginBottom: 14, textAlign: 'center' }}>
+              <div style={{ padding: '10px 8px' }}>
                 <div style={{ fontSize: 9, color: '#888', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>ลูกค้าสั่ง</div>
                 <div style={{ fontSize: 22, fontWeight: 800 }}>{formatNumber(so.qty)}</div>
-                <div style={{ fontSize: 10, color: '#aaa' }}>{unit}</div>
-              </div>
-              <div style={{ padding: '10px 8px', background: productionQty === 0 ? '#f0fdf4' : '#fffbeb' }}>
-                <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4, color: productionQty === 0 ? '#166534' : '#92400e' }}>ต้องผลิต</div>
-                <div style={{ fontSize: 22, fontWeight: 800, color: productionQty === 0 ? '#16a34a' : '#b45309' }}>{formatNumber(productionQty)}</div>
                 <div style={{ fontSize: 10, color: '#aaa' }}>{unit}</div>
               </div>
             </div>
@@ -424,9 +457,33 @@ function PrintSOModal({ so, onClose }: { so: SaleOrder; onClose: () => void }) {
 
             {/* ── หมายเหตุ ── */}
             <SHead>หมายเหตุ</SHead>
-            <div style={{ border: '1px solid #e5e7eb', borderRadius: 4, padding: '8px 10px', minHeight: 48, fontSize: 12, marginBottom: 16 }}>
-              {so.remark || ''}
-            </div>
+            {(() => {
+              const { color, text } = parseRemark(so.remark)
+              const colorMap: Record<string, { bg: string; border: string; label: string; dot: string }> = {
+                RED:    { bg: '#fef2f2', border: '#fca5a5', label: 'ด่วน',     dot: '#ef4444' },
+                ORANGE: { bg: '#fff7ed', border: '#fdba74', label: 'ระวัง',    dot: '#f97316' },
+                YELLOW: { bg: '#fefce8', border: '#fde047', label: 'แจ้งเตือน', dot: '#eab308' },
+                GREEN:  { bg: '#f0fdf4', border: '#86efac', label: 'ปกติ',     dot: '#22c55e' },
+                BLUE:   { bg: '#eff6ff', border: '#93c5fd', label: 'ข้อมูล',   dot: '#3b82f6' },
+                PURPLE: { bg: '#faf5ff', border: '#d8b4fe', label: 'พิเศษ',    dot: '#a855f7' },
+              }
+              const cfg = color ? colorMap[color] : null
+              return (
+                <div style={{
+                  border: `1px solid ${cfg?.border ?? '#e5e7eb'}`,
+                  background: cfg?.bg ?? '#fff',
+                  borderRadius: 4, padding: '8px 10px', minHeight: 48, fontSize: 12, marginBottom: 16
+                }}>
+                  {cfg && (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: cfg.bg, border: `1px solid ${cfg.border}`, borderRadius: 999, padding: '1px 8px', fontSize: 10, fontWeight: 700, marginBottom: 4, marginRight: 6 }}>
+                      <span style={{ width: 7, height: 7, borderRadius: '50%', background: cfg.dot, display: 'inline-block' }} />
+                      {cfg.label}
+                    </span>
+                  )}
+                  {text}
+                </div>
+              )
+            })()}
 
             {/* ── ลายเซ็น ── */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 24, marginTop: 28 }}>
@@ -578,10 +635,6 @@ export default function SaleOrder() {
 
   const set = (k: keyof FormState, v: any) => setForm(f => ({ ...f, [k]: v }))
 
-  const stockQtyNum   = parseFloat(form.stock_qty) || 0
-  const orderQtyNum   = parseFloat(form.qty) || 0
-  const productionQty = Math.max(0, orderQtyNum - stockQtyNum)
-
   const filtered = orders?.filter(o =>
     o.so_no.toLowerCase().includes(search.toLowerCase()) ||
     o.customer?.name?.toLowerCase().includes(search.toLowerCase()) ||
@@ -673,6 +726,7 @@ export default function SaleOrder() {
               <th className="text-left px-4 py-3 text-slate-400 font-medium hidden md:table-cell">ประเภท</th>
               <th className="text-right px-4 py-3 text-slate-400 font-medium">จำนวน</th>
               <th className="text-left px-4 py-3 text-slate-400 font-medium hidden lg:table-cell">กำหนดส่ง</th>
+              <th className="text-left px-4 py-3 text-slate-400 font-medium hidden lg:table-cell">หมายเหตุ</th>
               <th className="text-left px-4 py-3 text-slate-400 font-medium">สถานะ</th>
               <th className="px-4 py-3 w-24" />
             </tr>
@@ -701,6 +755,9 @@ export default function SaleOrder() {
                   )}
                 </td>
                 <td className="px-4 py-3 text-slate-400 hidden lg:table-cell">{formatDate(o.delivery_date)}</td>
+                <td className="px-4 py-3 hidden lg:table-cell max-w-[200px]">
+                  {o.remark && <RemarkBadge raw={o.remark} />}
+                </td>
                 <td className="px-4 py-3"><StatusBadge status={o.status} /></td>
                 <td className="px-4 py-3">
                   <div className="flex items-center justify-end gap-1">
@@ -737,45 +794,27 @@ export default function SaleOrder() {
             {/* Modal Body — scrollable */}
             <div className="overflow-y-auto scrollbar-thin flex-1 px-6 py-4 space-y-1">
 
-              {/* ── สรุปยอด: สต็อก / ลูกค้าสั่ง / ต้องผลิต ─────────────── */}
-              <div className="bg-slate-800/60 border border-slate-700 rounded-lg px-4 py-3">
-                <div className="flex items-center gap-2 mb-2">
-                  <Package size={13} className="text-slate-400" />
-                  <span className="text-xs font-medium text-slate-300">จำนวน</span>
+              {/* ── จำนวนลูกค้าสั่ง ─────────────────────────────────────── */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>จำนวนลูกค้าสั่ง *</Label>
+                  <Input
+                    type="number"
+                    value={form.qty}
+                    onChange={e => set('qty', e.target.value)}
+                    placeholder="0"
+                  />
                 </div>
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <Label>ลูกค้าสั่ง *</Label>
-                    <Input
-                      type="number"
-                      value={form.qty}
-                      onChange={e => set('qty', e.target.value)}
-                      placeholder="0"
-                    />
-                  </div>
-                  <div>
-                    <Label>สต็อกที่มีอยู่</Label>
-                    <Input
-                      type="number"
-                      value={form.stock_qty}
-                      onChange={e => set('stock_qty', e.target.value)}
-                      placeholder="0"
-                    />
-                  </div>
-                  <div>
-                    <Label>ต้องผลิต</Label>
-                    <div className={cn(
-                      'w-full rounded-lg px-3 py-2 text-sm font-bold border',
-                      productionQty === 0 && orderQtyNum > 0
-                        ? 'bg-green-500/10 border-green-500/30 text-green-300'
-                        : 'bg-slate-900 border-slate-700 text-yellow-300'
-                    )}>
-                      {orderQtyNum > 0 ? formatNumber(productionQty) : '—'}
-                      {productionQty === 0 && orderQtyNum > 0 && (
-                        <span className="block text-[10px] font-normal text-green-400 mt-0.5">ของครบจากสต็อก</span>
-                      )}
-                    </div>
-                  </div>
+                <div>
+                  <Label>หน่วย</Label>
+                  <Select value={form.unit} onChange={e => set('unit', e.target.value)}>
+                    <option value="kg">kg.</option>
+                    <option value="meter">เมตร</option>
+                    <option value="roll">ม้วน</option>
+                    <option value="sheet">แผ่น</option>
+                    <option value="piece">ชิ้น</option>
+                    <option value="ใบ">ใบ</option>
+                  </Select>
                 </div>
               </div>
 
@@ -850,8 +889,8 @@ export default function SaleOrder() {
                 </div>
                 <div>
                   <Label>เกรด</Label>
-                  <div className="flex gap-3 pt-1">
-                    {(['A','B'] as const).map(g => (
+                  <div className="flex gap-3 pt-1 flex-wrap">
+                    {(['A','B','PCR'] as const).map(g => (
                       <CheckBox key={g} checked={form.grade === g} onChange={v => set('grade', v ? g : '')} label={`เกรด ${g}`} />
                     ))}
                   </div>
@@ -887,21 +926,10 @@ export default function SaleOrder() {
 
               {/* ── ความยาว & จำนวน ─────────────────────────────────────── */}
               <SectionTitle>ความยาว & จำนวน</SectionTitle>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label>ความยาวต่อม้วน (เมตร)</Label>
                   <Input type="number" value={form.length_per_roll} onChange={e => set('length_per_roll', e.target.value)} placeholder="0" />
-                </div>
-                <div>
-                  <Label>หน่วย</Label>
-                  <Select value={form.unit} onChange={e => set('unit', e.target.value)}>
-                    <option value="kg">kg.</option>
-                    <option value="meter">เมตร</option>
-                    <option value="roll">ม้วน</option>
-                    <option value="sheet">แผ่น</option>
-                    <option value="piece">ชิ้น</option>
-                    <option value="ใบ">ใบ</option>
-                  </Select>
                 </div>
                 <div>
                   <Label>จำนวน ใบ/มัด</Label>
@@ -931,25 +959,57 @@ export default function SaleOrder() {
 
               {/* ── พาเลท ────────────────────────────────────────────────── */}
               <SectionTitle>พาเลท</SectionTitle>
-              <div className="grid grid-cols-3 gap-3 items-start">
-                <div className="col-span-2">
-                  <Label>ประเภทพาเลท</Label>
-                  <div className="flex gap-4 pt-1 flex-wrap">
-                    <CheckBox checked={form.pallet_type === 'wood'}    onChange={v => set('pallet_type', v ? 'wood'    : '')} label="พาเลทไม้" />
-                    <CheckBox checked={form.pallet_type === 'loscam'}  onChange={v => set('pallet_type', v ? 'loscam'  : '')} label="LOSCAM" />
-                    <CheckBox checked={form.pallet_type === 'plastic'} onChange={v => set('pallet_type', v ? 'plastic' : '')} label="พาเลทพลาสติก" />
+              {/* Toggle ออนพาเลท / ไม่ออนพาเลท */}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => { set('on_pallet', false); set('pallet_type', ''); set('pallet_qty', ''); set('rolls_per_pallet', '') }}
+                  className={cn(
+                    'flex-1 py-2 rounded-lg text-sm font-medium border transition-colors',
+                    !form.on_pallet
+                      ? 'bg-slate-600 border-slate-500 text-white'
+                      : 'bg-slate-800/60 border-slate-700 text-slate-400 hover:text-white'
+                  )}
+                >
+                  ไม่ออนพาเลท
+                </button>
+                <button
+                  type="button"
+                  onClick={() => set('on_pallet', true)}
+                  className={cn(
+                    'flex-1 py-2 rounded-lg text-sm font-medium border transition-colors',
+                    form.on_pallet
+                      ? 'bg-brand-600 border-brand-500 text-white'
+                      : 'bg-slate-800/60 border-slate-700 text-slate-400 hover:text-white'
+                  )}
+                >
+                  ออนพาเลท
+                </button>
+              </div>
+
+              {/* ลักษณะพาเลท — แสดงเฉพาะเมื่อออนพาเลท */}
+              {form.on_pallet && (
+                <div className="space-y-3 bg-slate-800/40 border border-slate-700 rounded-lg p-3">
+                  <div>
+                    <Label>ลักษณะพาเลท</Label>
+                    <div className="flex gap-4 pt-1 flex-wrap">
+                      <CheckBox checked={form.pallet_type === 'wood'}    onChange={v => set('pallet_type', v ? 'wood'    : '')} label="พาเลทไม้" />
+                      <CheckBox checked={form.pallet_type === 'loscam'}  onChange={v => set('pallet_type', v ? 'loscam'  : '')} label="LOSCAM" />
+                      <CheckBox checked={form.pallet_type === 'plastic'} onChange={v => set('pallet_type', v ? 'plastic' : '')} label="พาเลทพลาสติก" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label>จำนวนพาเลท</Label>
+                      <Input type="number" value={form.pallet_qty} onChange={e => set('pallet_qty', e.target.value)} placeholder="0" />
+                    </div>
+                    <div>
+                      <Label>ม้วน/พาเลท</Label>
+                      <Input type="number" value={form.rolls_per_pallet} onChange={e => set('rolls_per_pallet', e.target.value)} placeholder="0" />
+                    </div>
                   </div>
                 </div>
-                <div />
-                <div>
-                  <Label>จำนวนพาเลท</Label>
-                  <Input type="number" value={form.pallet_qty} onChange={e => set('pallet_qty', e.target.value)} placeholder="0" />
-                </div>
-                <div>
-                  <Label>ม้วน/พาเลท</Label>
-                  <Input type="number" value={form.rolls_per_pallet} onChange={e => set('rolls_per_pallet', e.target.value)} placeholder="0" />
-                </div>
-              </div>
+              )}
 
               {/* ── ข้อมูลจัดส่ง ─────────────────────────────────────────── */}
               <SectionTitle>ข้อมูลจัดส่ง</SectionTitle>
@@ -959,15 +1019,48 @@ export default function SaleOrder() {
                   <Input type="date" value={form.delivery_date} onChange={e => set('delivery_date', e.target.value)} />
                 </div>
               </div>
-              <div className="mt-3">
-                <Label>รายละเอียดเพิ่มเติม</Label>
+              <div className="mt-3 space-y-2">
+                <Label>หมายเหตุ</Label>
+                {/* color picker */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => set('remarkColor', '')}
+                    className={cn('px-2.5 py-1 rounded-full text-xs border transition-colors',
+                      form.remarkColor === '' ? 'bg-slate-600 border-slate-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white')}
+                  >ไม่มีสี</button>
+                  {REMARK_COLORS.map(c => (
+                    <button
+                      key={c.key}
+                      type="button"
+                      onClick={() => set('remarkColor', c.key)}
+                      className={cn('flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs border transition-colors',
+                        form.remarkColor === c.key ? `${c.bg} ${c.border} ${c.text}` : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white')}
+                    >
+                      <span className={cn('w-2 h-2 rounded-full', c.dot)} />
+                      {c.label}
+                    </button>
+                  ))}
+                </div>
                 <textarea
                   value={form.remark}
                   onChange={e => set('remark', e.target.value)}
                   rows={3}
                   placeholder="รายละเอียดเพิ่มเติม..."
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 outline-none focus:border-brand-500 resize-none"
+                  className={cn(
+                    'w-full border rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 outline-none resize-none transition-colors',
+                    form.remarkColor
+                      ? (() => { const c = REMARK_COLORS.find(x => x.key === form.remarkColor)!; return `${c.bg} ${c.border} focus:${c.border}` })()
+                      : 'bg-slate-800 border-slate-700 focus:border-brand-500'
+                  )}
                 />
+                {/* preview */}
+                {form.remark && form.remarkColor && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-500 text-xs">ตัวอย่าง:</span>
+                    <RemarkBadge raw={encodeRemark(form.remarkColor, form.remark)} />
+                  </div>
+                )}
               </div>
 
               {error && <p className="text-red-400 text-sm pt-1">{error}</p>}

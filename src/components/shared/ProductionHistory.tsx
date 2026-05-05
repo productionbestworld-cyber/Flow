@@ -17,7 +17,7 @@ function formatTs(ts?: string) {
 function DeptBadge({ dept }: { dept: PlanningDept }) {
   if (dept === 'printing') return <span className="flex items-center gap-1 text-purple-300 text-[10px] bg-purple-500/15 border border-purple-500/30 px-1.5 py-0.5 rounded"><Printer size={9} /> Printing</span>
   if (dept === 'grinding') return <span className="flex items-center gap-1 text-orange-300 text-[10px] bg-orange-500/15 border border-orange-500/30 px-1.5 py-0.5 rounded"><Cog size={9} /> Grinding</span>
-  return <span className="flex items-center gap-1 text-brand-300 text-[10px] bg-brand-500/15 border border-brand-500/30 px-1.5 py-0.5 rounded"><Wind size={9} /> Extrusion</span>
+  return <span className="flex items-center gap-1 text-brand-300 text-[10px] bg-brand-500/15 border border-brand-500/30 px-1.5 py-0.5 rounded"><Wind size={9} /> Blow</span>
 }
 
 function StatusDot({ status }: { status: string }) {

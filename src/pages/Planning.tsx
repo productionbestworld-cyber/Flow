@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
-import { Wind, Printer, X, Plus, Clock, CheckCircle2, Package, Cog, ChevronUp, ChevronDown, Edit2 } from 'lucide-react'
-import { useSaleOrders } from '../hooks/useSaleOrders'
+import { Wind, Printer, X, Plus, Clock, CheckCircle2, Package, Cog, ChevronUp, ChevronDown, Edit2, Download, FileText } from 'lucide-react'
+import { downloadCSV, printDocument } from '../lib/csvUtils'
+import { useSaleOrders, useUpdateSaleOrder } from '../hooks/useSaleOrders'
 import { usePlanningJobs, useCreatePlanningJob, useAssignMachine, useUnassignMachine, useUpdatePlanningJob, useDeletePlanningJob, usePromoteQueuedJobs } from '../hooks/usePlanning'
 import { formatNumber, cn } from '../lib/utils'
 import SODetail from '../components/shared/SODetail'
@@ -315,6 +316,7 @@ export default function Planning() {
   const { data: jobs, isLoading } = usePlanningJobs()
   const promoteQueue   = usePromoteQueuedJobs()
   const promotedRef    = useRef(false)
+  const updateOrder    = useUpdateSaleOrder()
   const createJob      = useCreatePlanningJob()
   const assignMachine  = useAssignMachine()
   const unassignMachine = useUnassignMachine()
@@ -330,6 +332,7 @@ export default function Planning() {
   const [editRoute, setEditRoute]         = useState<RouteAfter | ''>('')
   const [editRawQty, setEditRawQty]       = useState('')
   const [createRawQty, setCreateRawQty]   = useState('')
+  const [createStockQty, setCreateStockQty] = useState('')
 
   useEffect(() => {
     if (jobs && jobs.length > 0 && !promotedRef.current) {
@@ -400,9 +403,14 @@ export default function Planning() {
       alert('กรุณากรอกวัตถุดิบที่เบิก (kg) ก่อนสร้างแผน')
       return
     }
+    // บันทึก stock_qty กลับไปที่ SO ถ้าผู้วางแผนกรอก
+    const stockQty = createStockQty !== '' ? parseFloat(createStockQty) : (selectedOrder.stock_qty ?? 0)
+    if (createStockQty !== '') {
+      await updateOrder.mutateAsync({ id: selectedOrder.id, stock_qty: stockQty })
+    }
     const dept: PlanningDept       = asGrinding ? 'grinding' : 'extrusion'
     const route_after: RouteAfter | undefined = asGrinding ? undefined : getRouteAfter(selectedOrder)
-    const productionQty = Math.max(0, selectedOrder.qty - (selectedOrder.stock_qty ?? 0))
+    const productionQty = Math.max(0, selectedOrder.qty - stockQty)
     if (!asGrinding && createRawQty) {
       const tol    = getRawTolerance(selectedOrder)
       const maxRaw = productionQty * (1 + tol)
@@ -430,6 +438,7 @@ export default function Planning() {
     setMachineForCreate(null)
     setIsGrinding(false)
     setCreateRawQty('')
+    setCreateStockQty('')
   }
 
   function handleOpenEdit(job: PlanningJob) {
@@ -468,13 +477,200 @@ export default function Planning() {
           <h1 className="text-xl font-bold text-white">Planning</h1>
           <p className="text-slate-400 text-sm mt-0.5">สถานะเครื่องจักรและแผนการผลิต</p>
         </div>
-        <button
-          onClick={() => { setSelectedOrder(null); setMachineForCreate(null); setIsGrinding(false); setShowModal(true) }}
-          className="flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm px-4 py-2 rounded-lg transition-colors"
-        >
-          <Plus size={15} /> วางแผนใหม่
-        </button>
+        <div className="flex items-center gap-2 no-print">
+          <button
+            onClick={() => {
+              const headers = ['Lot No.','SO No.','ลูกค้า','สินค้า','แผนก','เครื่อง','จำนวนวางแผน (kg)','วัตถุดิบ (kg)','ส่งต่อ','สถานะ']
+              const rows = (jobs ?? []).map(j => [
+                j.lot_no ?? '', j.sale_order?.so_no ?? '', j.sale_order?.customer?.name ?? '',
+                j.sale_order?.product?.part_name ?? '', j.dept, j.machine_no ?? '',
+                j.planned_qty, j.raw_material_qty ?? '', j.route_after ?? '', j.status,
+              ])
+              downloadCSV(`planning_${new Date().toISOString().slice(0,10)}.csv`, headers, rows)
+            }}
+            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white text-sm px-3 py-2 rounded-lg transition-colors"
+          >
+            <Download size={15} /> Export
+          </button>
+          <button
+            onClick={() => {
+              const rows = (jobs ?? []).filter(j => ['queued','ongoing','pending_receipt'].includes(j.status))
+              const date = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })
+              printDocument('แผนการผลิต', `
+                <h1>แผนการผลิต</h1>
+                <p class="meta">วันที่พิมพ์: ${date} · รวม ${rows.length} งาน</p>
+                <table>
+                  <thead><tr>
+                    <th>Lot No.</th><th>SO No.</th><th>ลูกค้า</th><th>สินค้า</th>
+                    <th>แผนก</th><th>เครื่อง</th><th>จำนวน (kg)</th><th>วัตถุดิบ (kg)</th><th>ส่งต่อ</th><th>สถานะ</th>
+                  </tr></thead>
+                  <tbody>${rows.map(j => `<tr>
+                    <td>${j.lot_no ?? ''}</td><td>${j.sale_order?.so_no ?? ''}</td>
+                    <td>${j.sale_order?.customer?.name ?? ''}</td><td>${j.sale_order?.product?.part_name ?? ''}</td>
+                    <td>${j.dept}</td><td>${j.machine_no ?? '-'}</td>
+                    <td style="text-align:right">${(j.planned_qty ?? 0).toLocaleString()}</td>
+                    <td style="text-align:right">${j.raw_material_qty?.toLocaleString() ?? '-'}</td>
+                    <td>${j.route_after ?? '-'}</td><td>${j.status}</td>
+                  </tr>`).join('')}</tbody>
+                </table>
+              `)
+            }}
+            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white text-sm px-3 py-2 rounded-lg transition-colors"
+          >
+            <FileText size={15} /> พิมพ์
+          </button>
+          <button
+            onClick={() => { setSelectedOrder(null); setMachineForCreate(null); setIsGrinding(false); setShowModal(true) }}
+            className="flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm px-4 py-2 rounded-lg transition-colors"
+          >
+            <Plus size={15} /> วางแผนใหม่
+          </button>
+        </div>
       </div>
+
+      {/* ── Planning Dashboard ───────────────────────────────────────────── */}
+      {(() => {
+        const totalBlow     = EXTRUSION_MACHINES.length
+        const totalPrint    = PRINTING_MACHINES.length
+        const blowActive    = allActiveJobs.filter(j => j.dept === 'extrusion' && j.status === 'ongoing').length
+        const printActive   = allActiveJobs.filter(j => j.dept === 'printing'  && j.status === 'ongoing').length
+        const blowQueued    = allActiveJobs.filter(j => j.dept === 'extrusion' && j.status === 'queued').length
+        const printQueued   = allActiveJobs.filter(j => j.dept === 'printing'  && j.status === 'queued').length
+        const blowIdle      = totalBlow  - blowActive
+        const printIdle     = totalPrint - printActive
+        const totalPlannedQty = allActiveJobs.reduce((s, j) => s + (j.planned_qty ?? 0), 0)
+        const totalSOQty      = (orders?.filter(o => ['approved','in_planning','in_production'].includes(o.status)) ?? [])
+                                  .reduce((s, o) => s + Math.max(0, o.qty - (o.stock_qty ?? 0)), 0)
+        const blowUtil  = totalBlow  > 0 ? Math.round(blowActive  / totalBlow  * 100) : 0
+        const printUtil = totalPrint > 0 ? Math.round(printActive / totalPrint * 100) : 0
+
+        const cards = [
+          { label: 'SO รอวางแผน',   value: approvedOrders.length, unit: 'ใบ',    color: 'text-sky-300',    bg: 'bg-sky-500/10 border-sky-500/25',    dot: 'bg-sky-400' },
+          { label: 'กำลังผลิต',      value: blowActive + printActive, unit: 'เครื่อง', color: 'text-green-300', bg: 'bg-green-500/10 border-green-500/25', dot: 'bg-green-400 animate-pulse' },
+          { label: 'คิวรอ',          value: blowQueued + printQueued, unit: 'งาน',   color: 'text-yellow-300', bg: 'bg-yellow-500/10 border-yellow-500/25', dot: 'bg-yellow-400' },
+          { label: 'เครื่องว่าง',    value: blowIdle + printIdle,     unit: 'เครื่อง', color: 'text-slate-300',  bg: 'bg-slate-800 border-slate-700',      dot: 'bg-slate-500' },
+        ]
+
+        return (
+          <div className="space-y-3">
+            {/* stat cards */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {cards.map(c => (
+                <div key={c.label} className={`border rounded-xl px-4 py-4 flex items-center gap-3 ${c.bg}`}>
+                  <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${c.dot}`} />
+                  <div>
+                    <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-0.5">{c.label}</p>
+                    <p className={`text-2xl font-bold leading-none ${c.color}`}>
+                      {c.value}
+                      <span className="text-xs font-normal text-slate-400 ml-1">{c.unit}</span>
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* machine utilization + planned qty */}
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+              {/* Blow utilization */}
+              <div className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-3">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-1.5">
+                    <Wind size={13} className="text-brand-400" />
+                    <span className="text-slate-300 text-xs font-semibold">Blow</span>
+                  </div>
+                  <span className="text-xs text-slate-400">{blowActive}/{totalBlow} เครื่อง</span>
+                </div>
+                <div className="h-2 bg-slate-800 rounded-full overflow-hidden mb-1.5">
+                  <div
+                    className="h-full bg-brand-500 rounded-full transition-all duration-500"
+                    style={{ width: `${blowUtil}%` }}
+                  />
+                </div>
+                <div className="flex justify-between text-[10px] text-slate-500">
+                  <span>ผลิต {blowActive} · คิว {blowQueued} · ว่าง {blowIdle}</span>
+                  <span className={blowUtil >= 70 ? 'text-green-400 font-bold' : blowUtil >= 40 ? 'text-yellow-400' : 'text-slate-500'}>{blowUtil}%</span>
+                </div>
+              </div>
+
+              {/* Printing utilization */}
+              <div className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-3">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-1.5">
+                    <Printer size={13} className="text-purple-400" />
+                    <span className="text-slate-300 text-xs font-semibold">Printing</span>
+                  </div>
+                  <span className="text-xs text-slate-400">{printActive}/{totalPrint} เครื่อง</span>
+                </div>
+                <div className="h-2 bg-slate-800 rounded-full overflow-hidden mb-1.5">
+                  <div
+                    className="h-full bg-purple-500 rounded-full transition-all duration-500"
+                    style={{ width: `${printUtil}%` }}
+                  />
+                </div>
+                <div className="flex justify-between text-[10px] text-slate-500">
+                  <span>ผลิต {printActive} · คิว {printQueued} · ว่าง {printIdle}</span>
+                  <span className={printUtil >= 70 ? 'text-green-400 font-bold' : printUtil >= 40 ? 'text-yellow-400' : 'text-slate-500'}>{printUtil}%</span>
+                </div>
+              </div>
+
+              {/* ยอดวางแผน vs ยอด SO */}
+              <div className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-3">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-1.5">
+                    <Package size={13} className="text-sky-400" />
+                    <span className="text-slate-300 text-xs font-semibold">ยอดที่วางแผน</span>
+                  </div>
+                  <span className="text-xs text-slate-400">{allActiveJobs.length} งาน</span>
+                </div>
+                <div className="h-2 bg-slate-800 rounded-full overflow-hidden mb-1.5">
+                  <div
+                    className="h-full bg-sky-500 rounded-full transition-all duration-500"
+                    style={{ width: totalSOQty > 0 ? `${Math.min(100, Math.round(totalPlannedQty / totalSOQty * 100))}%` : '0%' }}
+                  />
+                </div>
+                <div className="flex justify-between text-[10px] text-slate-500">
+                  <span>{(totalPlannedQty / 1000).toFixed(1)}t / {(totalSOQty / 1000).toFixed(1)}t</span>
+                  <span className="text-sky-400 font-bold">
+                    {totalSOQty > 0 ? `${Math.min(100, Math.round(totalPlannedQty / totalSOQty * 100))}%` : '—'}
+                  </span>
+                </div>
+              </div>
+
+              {/* วัตถุดิบที่เบิก */}
+              {(() => {
+                const totalRaw     = allActiveJobs.reduce((s, j) => s + (j.raw_material_qty ?? 0), 0)
+                const totalProdQty = allActiveJobs.reduce((s, j) => s + (j.planned_qty ?? 0), 0)
+                const lossQty      = Math.max(0, totalRaw - totalProdQty)
+                const yld          = totalRaw > 0 ? Math.round(totalProdQty / totalRaw * 100) : null
+                return (
+                  <div className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-1.5">
+                        <Cog size={13} className="text-amber-400" />
+                        <span className="text-slate-300 text-xs font-semibold">วัตถุดิบที่เบิก</span>
+                      </div>
+                      {yld !== null && (
+                        <span className={cn(
+                          'text-[10px] font-bold px-2 py-0.5 rounded-full',
+                          yld >= 95 ? 'bg-green-500/20 text-green-300' : yld >= 90 ? 'bg-yellow-500/20 text-yellow-300' : 'bg-red-500/20 text-red-300'
+                        )}>Yield {yld}%</span>
+                      )}
+                    </div>
+                    <p className="text-2xl font-bold text-amber-300 leading-none mb-2">
+                      {formatNumber(totalRaw)}
+                      <span className="text-xs font-normal text-slate-400 ml-1">kg</span>
+                    </p>
+                    <div className="flex gap-3 text-[10px] text-slate-500">
+                      <span className="text-sky-400">→ ผลิต {formatNumber(totalProdQty)} kg</span>
+                      {lossQty > 0 && <span className="text-red-400">สูญเสีย {formatNumber(lossQty)} kg</span>}
+                    </div>
+                  </div>
+                )
+              })()}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* SO รอวางแผน */}
       {approvedOrders.length > 0 && (
@@ -589,7 +785,7 @@ export default function Planning() {
               )}
             >
               {tab === 'extrusion' ? <Wind size={15} /> : <Printer size={15} />}
-              {tab === 'extrusion' ? 'Extrusion' : 'Printing'}
+              {tab === 'extrusion' ? 'Blow' : 'Printing'}
               {(() => {
                 const pending = allActiveJobs.filter(j => j.dept === tab && j.status === 'queued').length
                 return pending > 0 ? (
@@ -771,7 +967,7 @@ export default function Planning() {
               <h2 className="text-white font-semibold">
                 {selectedOrder ? 'ยืนยันแผนการผลิต' : machineForCreate ? `เพิ่มงานให้ ${machineForCreate}` : 'วางแผนใหม่'}
               </h2>
-              <button onClick={() => { setShowModal(false); setSelectedOrder(null); setMachineForCreate(null) }} className="text-slate-400 hover:text-white">
+              <button onClick={() => { setShowModal(false); setSelectedOrder(null); setMachineForCreate(null); setCreateStockQty('') }} className="text-slate-400 hover:text-white">
                 <X size={18} />
               </button>
             </div>
@@ -781,28 +977,41 @@ export default function Planning() {
                 <>
                   <SODetail so={selectedOrder} />
 
-                  {/* แสดงข้อมูลสต็อกที่จะใช้ */}
-                  {(selectedOrder.stock_qty ?? 0) > 0 && (
-                    <div className="bg-green-500/10 border border-green-500/25 rounded-lg px-4 py-3 space-y-1 text-xs">
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">ลูกค้าสั่ง</span>
-                        <span className="text-white font-medium">{selectedOrder.qty.toLocaleString()} kg</span>
+                  {/* ── ยอดสั่งผลิต — ผู้วางแผนกรอก stock_qty ── */}
+                  {(() => {
+                    const stockNum  = createStockQty !== '' ? (parseFloat(createStockQty) || 0) : (selectedOrder.stock_qty ?? 0)
+                    const prodQtyCalc = Math.max(0, selectedOrder.qty - stockNum)
+                    return (
+                      <div className="bg-slate-800/60 border border-slate-700 rounded-lg px-4 py-3 space-y-3">
+                        <div className="grid grid-cols-2 gap-3 text-xs">
+                          <div>
+                            <p className="text-slate-400 mb-1">ลูกค้าสั่ง</p>
+                            <p className="text-white font-bold text-base">{selectedOrder.qty.toLocaleString()} <span className="text-slate-400 text-xs font-normal">{selectedOrder.unit}</span></p>
+                          </div>
+                          <div>
+                            <label className="block text-slate-400 mb-1">สต็อกที่มีอยู่ <span className="text-slate-500">(กรอกโดยผู้วางแผน)</span></label>
+                            <input
+                              type="number"
+                              value={createStockQty}
+                              onChange={e => setCreateStockQty(e.target.value)}
+                              placeholder={selectedOrder.stock_qty?.toString() ?? '0'}
+                              className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-brand-500"
+                            />
+                          </div>
+                        </div>
+                        <div className={`flex justify-between items-center px-3 py-2 rounded-lg text-sm font-semibold ${prodQtyCalc === 0 ? 'bg-green-500/10 border border-green-500/25' : 'bg-yellow-500/10 border border-yellow-500/25'}`}>
+                          <span className={prodQtyCalc === 0 ? 'text-green-300' : 'text-yellow-300'}>ต้องผลิต</span>
+                          <span className={prodQtyCalc === 0 ? 'text-green-200' : 'text-yellow-200'}>{prodQtyCalc.toLocaleString()} {selectedOrder.unit}</span>
+                        </div>
                       </div>
-                      <div className="flex justify-between">
-                        <span className="text-green-400">นำจากสต็อก</span>
-                        <span className="text-green-300 font-medium">−{(selectedOrder.stock_qty ?? 0).toLocaleString()} kg</span>
-                      </div>
-                      <div className="flex justify-between border-t border-slate-600/60 pt-1 font-semibold">
-                        <span className="text-yellow-300">ต้องผลิตเพิ่ม</span>
-                        <span className="text-yellow-200">{Math.max(0, selectedOrder.qty - (selectedOrder.stock_qty ?? 0)).toLocaleString()} kg</span>
-                      </div>
-                    </div>
-                  )}
+                    )
+                  })()}
 
                   <div className="bg-slate-800 rounded-lg px-4 py-3 space-y-2">
                     <div>
                       {(() => {
-                        const prodQty  = Math.max(0, selectedOrder.qty - (selectedOrder.stock_qty ?? 0))
+                        const stockNum = createStockQty !== '' ? (parseFloat(createStockQty) || 0) : (selectedOrder.stock_qty ?? 0)
+                        const prodQty  = Math.max(0, selectedOrder.qty - stockNum)
                         const tol    = getRawTolerance(selectedOrder)
                         const maxRaw = prodQty * (1 + tol)
                         const rawNum = parseFloat(createRawQty) || 0
@@ -849,7 +1058,7 @@ export default function Planning() {
                     ) : (
                       <div className="flex items-center gap-2 text-sm font-medium">
                         <Wind size={14} className="text-brand-400" />
-                        <span className="text-white">Extrusion</span>
+                        <span className="text-white">Blow</span>
                         <span className="text-slate-500">→</span>
                         {getRouteAfter(selectedOrder) === 'to_printing' ? (
                           <span className="flex items-center gap-1 text-purple-300"><Printer size={13} /> Printing → คลัง</span>
@@ -926,7 +1135,7 @@ export default function Planning() {
                                 onClick={() => { setSelectedOrder(o); setIsGrinding(false) }}
                                 className="flex-1 bg-brand-600 hover:bg-brand-700 text-white text-xs px-3 py-2 rounded-lg transition-colors"
                               >
-                                <Wind size={11} className="inline mr-1" /> Extrusion
+                                <Wind size={11} className="inline mr-1" /> Blow
                               </button>
                             </div>
                           </div>
@@ -971,11 +1180,12 @@ export default function Planning() {
 
             <div className="flex gap-3 px-5 py-4 border-t border-slate-800 shrink-0">
               <button
-                onClick={() => { setShowModal(false); setSelectedOrder(null); setMachineForCreate(null) }}
+                onClick={() => { setShowModal(false); setSelectedOrder(null); setMachineForCreate(null); setCreateStockQty('') }}
                 className="flex-1 bg-slate-800 hover:bg-slate-700 text-white py-2.5 rounded-lg text-sm"
               >ยกเลิก</button>
               {selectedOrder ? (() => {
-                const prodQty  = Math.max(0, selectedOrder.qty - (selectedOrder.stock_qty ?? 0))
+                const stockNum_ = createStockQty !== '' ? (parseFloat(createStockQty) || 0) : (selectedOrder.stock_qty ?? 0)
+                const prodQty  = Math.max(0, selectedOrder.qty - stockNum_)
                 const tol_     = getRawTolerance(selectedOrder)
                 const maxRaw   = prodQty * (1 + tol_)
                 const rawNum   = parseFloat(createRawQty) || 0

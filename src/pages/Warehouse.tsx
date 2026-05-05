@@ -1,5 +1,6 @@
-import { useState } from 'react'
-import { X, PackagePlus, CheckCircle, ClipboardList, Truck, Wind, Printer } from 'lucide-react'
+import { useState, useRef } from 'react'
+import { X, PackagePlus, CheckCircle, ClipboardList, Truck, Wind, Printer, Download, Upload, FileText } from 'lucide-react'
+import { downloadCSV, downloadTemplate, parseCSV, printDocument } from '../lib/csvUtils'
 import { useWarehouseStock, useReceiveToStock } from '../hooks/useWarehouse'
 import { usePlanningJobs } from '../hooks/usePlanning'
 import { useProductionLogs } from '../hooks/useProduction'
@@ -26,6 +27,9 @@ export default function Warehouse() {
   const [supplements, setSupplements] = useState<{ stock_id: string; qty: number; label: string }[]>([])
 
   const [manualQty, setManualQty] = useState('')
+  const csvInputRef = useRef<HTMLInputElement>(null)
+  const [actualQty, setActualQty]     = useState('')   // ยอดจริงที่คลังนับได้
+  const [actualRolls, setActualRolls] = useState('')   // ม้วนจริง
 
   // แสดงแค่ job สุดท้ายต่อ SO (printing > extrusion — ไม่รวม grinding)
   const allPendingReceipt = jobs?.filter(j => j.status === 'pending_receipt' && j.dept !== 'grinding') ?? []
@@ -88,27 +92,28 @@ export default function Warehouse() {
   function openReceive(j: PlanningJob) {
     setReceiveModal(j)
     setLocation('')
+    setActualQty('')
+    setActualRolls('')
   }
 
-  async function handleReceive() {
+  async function handleReceive(calcQty: number) {
     if (!receiveModal) return
     const job = receiveModal
-    const { ext, grd, prt } = getSoProductionSummary(job.sale_order_id)
-    // ยอดรับ = input พิม - เศษพิม → good_qty พิม → (good เป่า + กรอคืน) → planned_qty
-    const prtCalcQty = prt ? (prt.inputQty - prt.wasteQty) : undefined
-    const qty = prtCalcQty ?? prt?.goodQty
-      ?? ((ext.goodQty ?? 0) + (grd?.goodQty ?? 0) || job.planned_qty)
+    // ถ้าคลังกรอกยอดจริง ใช้ยอดนั้น มิฉะนั้นใช้ยอดที่คำนวณจากระบบ
+    const finalQty = actualQty ? parseFloat(actualQty) : calcQty
     await receive.mutateAsync({
       planning_job_id: job.id,
       lot_no:          job.lot_no ?? '',
       product_id:      job.sale_order?.product_id ?? '',
-      qty,
+      qty:             finalQty,
       unit:            job.sale_order?.unit ?? 'kg',
       location:        location || undefined,
       received_by:     user?.id,
     })
     setReceiveModal(null)
     setLocation('')
+    setActualQty('')
+    setActualRolls('')
   }
 
   async function handleApproveReq(id: string) {
@@ -164,43 +169,145 @@ export default function Warehouse() {
 
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-xl font-bold text-white">คลังสินค้า</h1>
-        <p className="text-slate-400 text-sm mt-0.5">รับสินค้าเข้าคลัง อนุมัติใบเบิก และดูสต็อกปัจจุบัน</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-bold text-white">คลังสินค้า</h1>
+          <p className="text-slate-400 text-sm mt-0.5">รับสินค้าเข้าคลัง อนุมัติใบเบิก และดูสต็อกปัจจุบัน</p>
+        </div>
+        <div className="flex items-center gap-2 no-print">
+          <button
+            onClick={() => downloadTemplate('warehouse_template.csv',
+              ['Lot No.','Product Item Code','จำนวน (kg)','หน่วย','ตำแหน่งจัดเก็บ','หมายเหตุ'],
+              ['LOT-001','ITEM001','1000','kg','A-01','สต็อกเดิม']
+            )}
+            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white text-sm px-3 py-2 rounded-lg transition-colors"
+            title="ดาวน์โหลด Template CSV"
+          >
+            <Download size={15} /> Template
+          </button>
+          <button
+            onClick={() => csvInputRef.current?.click()}
+            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white text-sm px-3 py-2 rounded-lg transition-colors"
+          >
+            <Upload size={15} /> Import CSV
+          </button>
+          <input
+            ref={csvInputRef} type="file" accept=".csv" className="hidden"
+            onChange={async e => {
+              const file = e.target.files?.[0]; if (!file) return
+              const text = await file.text()
+              const rows = parseCSV(text)
+              alert(`อ่านข้อมูล ${rows.length} รายการจาก CSV\n(ฟีเจอร์ import stock manual กำลังพัฒนา)`)
+              e.target.value = ''
+            }}
+          />
+          <button
+            onClick={() => {
+              const headers = ['Lot No.','สินค้า','ประเภท','จำนวน (kg)','หน่วย','ตำแหน่ง','วันที่รับ','สถานะ']
+              const rows = goodStock.map(s => [
+                s.lot_no, s.planning_job?.sale_order?.product?.part_name ?? '',
+                s.planning_job?.sale_order?.job_type ?? '',
+                s.qty, s.unit ?? 'kg', s.location ?? '',
+                s.received_at ? new Date(s.received_at).toLocaleDateString('th-TH') : '',
+                s.condition ?? 'good',
+              ])
+              downloadCSV(`stock_${new Date().toISOString().slice(0,10)}.csv`, headers, rows)
+            }}
+            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white text-sm px-3 py-2 rounded-lg transition-colors"
+          >
+            <Download size={15} /> Export
+          </button>
+          <button
+            onClick={() => {
+              const date = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })
+              printDocument('รายงานสต็อกสินค้าคงคลัง', `
+                <h1>รายงานสต็อกสินค้าคงคลัง</h1>
+                <p class="meta">วันที่พิมพ์: ${date} · รวม ${goodStock.length} Lot · ${formatNumber(totalQty)} kg</p>
+                <table>
+                  <thead><tr>
+                    <th>Lot No.</th><th>สินค้า</th><th>ประเภท</th><th>จำนวน (kg)</th><th>หน่วย</th><th>ตำแหน่ง</th><th>วันที่รับ</th>
+                  </tr></thead>
+                  <tbody>${goodStock.map(s => `<tr>
+                    <td>${s.lot_no}</td>
+                    <td>${s.planning_job?.sale_order?.product?.part_name ?? '-'}</td>
+                    <td>${s.planning_job?.sale_order?.job_type ?? '-'}</td>
+                    <td style="text-align:right">${formatNumber(s.qty)}</td>
+                    <td>${s.unit ?? 'kg'}</td>
+                    <td>${s.location ?? '-'}</td>
+                    <td>${s.received_at ? new Date(s.received_at).toLocaleDateString('th-TH') : '-'}</td>
+                  </tr>`).join('')}
+                  <tr class="total-row"><td colspan="3">รวมทั้งหมด</td><td style="text-align:right">${formatNumber(totalQty)}</td><td colspan="3"></td></tr>
+                  </tbody>
+                </table>
+              `)
+            }}
+            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white text-sm px-3 py-2 rounded-lg transition-colors"
+          >
+            <FileText size={15} /> พิมพ์
+          </button>
+        </div>
       </div>
 
       {/* Summary */}
       {(() => {
-        // แยกสต็อกตามประเภทสินค้า
-        const printStock = goodStock.filter(s => {
+        function byJobType(types: string[]) {
+          const items = goodStock.filter(s => {
+            const jt = s.planning_job?.sale_order?.job_type ?? ''
+            return types.some(t => jt === t)
+          })
+          return { qty: items.reduce((s, i) => s + i.qty, 0), lots: items.length }
+        }
+        function isPrint(s: typeof goodStock[0]) {
           const ptype = s.planning_job?.sale_order?.product?.type
           const jtype = s.planning_job?.sale_order?.job_type
           return ptype === 'print' || ptype === 'blow_print' || jtype === 'ฟิล์มพิมพ์' || s.lot_no.startsWith('PRI-')
-        })
-        const blowStock  = goodStock.filter(s => !printStock.includes(s))
-        const printQty   = printStock.reduce((sum, s) => sum + s.qty, 0)
-        const blowQty    = blowStock.reduce((sum, s) => sum + s.qty, 0)
+        }
+
+        const shrink      = byJobType(['Shrink Film'])
+        const stretch     = byJobType(['Stretch Film'])
+        const bagCover    = byJobType(['ถุงคลุม'])
+        const sheet       = byJobType(['แผ่นชีส'])
+        const tubeBag     = byJobType(['ถุงหลอด'])
+        const printItems  = goodStock.filter(isPrint)
+        const printQty    = printItems.reduce((s, i) => s + i.qty, 0)
+        const printLots   = printItems.length
+
+        const typeCards = [
+          { label: 'Shrink Film',  qty: shrink.qty,   lots: shrink.lots,   color: 'text-brand-300',  border: 'border-brand-500/20',  icon: <Wind size={11} /> },
+          { label: 'ฟิล์มพิมพ์', qty: printQty,     lots: printLots,     color: 'text-purple-300', border: 'border-purple-500/20', icon: <Printer size={11} /> },
+          { label: 'Stretch Film', qty: stretch.qty,  lots: stretch.lots,  color: 'text-sky-300',    border: 'border-sky-500/20',    icon: <Wind size={11} /> },
+          { label: 'ถุงคลุม',     qty: bagCover.qty, lots: bagCover.lots, color: 'text-teal-300',   border: 'border-teal-500/20',   icon: null },
+          { label: 'แผ่นชีส',    qty: sheet.qty,    lots: sheet.lots,    color: 'text-amber-300',  border: 'border-amber-500/20',  icon: null },
+          { label: 'ถุงหลอด',    qty: tubeBag.qty,  lots: tubeBag.lots,  color: 'text-rose-300',   border: 'border-rose-500/20',   icon: null },
+        ]
+
         return (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-              <p className="text-slate-400 text-xs">สต็อกรวม</p>
-              <p className="text-2xl font-bold text-white mt-1">{formatNumber(totalQty)}</p>
-              <p className="text-slate-500 text-[10px] mt-1">kg · {goodStock.length} Lot</p>
+          <div className="space-y-3">
+            {/* แถวบน: สต็อกรวม + รอรับ */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                <p className="text-slate-400 text-xs">สต็อกรวม</p>
+                <p className="text-2xl font-bold text-white mt-1">{formatNumber(totalQty)}</p>
+                <p className="text-slate-500 text-[10px] mt-1">kg · {goodStock.length} Lot</p>
+              </div>
+              <div className="bg-slate-900 border border-yellow-500/20 rounded-xl p-4">
+                <p className="text-slate-400 text-xs">รอรับ / ใบเบิกรอ</p>
+                <p className="text-2xl font-bold text-yellow-400 mt-1">{pendingReceiptBySo.length}</p>
+                <p className="text-slate-500 text-[10px] mt-1">รับ · {pendingReqs.length} ใบเบิก</p>
+              </div>
             </div>
-            <div className="bg-slate-900 border border-brand-500/20 rounded-xl p-4">
-              <p className="text-slate-400 text-xs flex items-center gap-1"><Wind size={11} /> ม้วนใส</p>
-              <p className="text-2xl font-bold text-brand-300 mt-1">{formatNumber(blowQty)}</p>
-              <p className="text-slate-500 text-[10px] mt-1">kg · {blowStock.length} Lot</p>
-            </div>
-            <div className="bg-slate-900 border border-purple-500/20 rounded-xl p-4">
-              <p className="text-slate-400 text-xs flex items-center gap-1"><Printer size={11} /> ม้วนพิมพ์</p>
-              <p className="text-2xl font-bold text-purple-300 mt-1">{formatNumber(printQty)}</p>
-              <p className="text-slate-500 text-[10px] mt-1">kg · {printStock.length} Lot</p>
-            </div>
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-              <p className="text-slate-400 text-xs">รอรับ / ใบเบิกรอ</p>
-              <p className="text-2xl font-bold text-yellow-400 mt-1">{pendingReceiptBySo.length}</p>
-              <p className="text-slate-500 text-[10px] mt-1">รับ · {pendingReqs.length} ใบเบิก</p>
+
+            {/* แถวล่าง: แยกตามประเภทสินค้า */}
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+              {typeCards.map(c => (
+                <div key={c.label} className={`bg-slate-900 border ${c.border} rounded-xl p-4`}>
+                  <p className="text-slate-400 text-xs flex items-center gap-1">
+                    {c.icon}{c.label}
+                  </p>
+                  <p className={`text-xl font-bold mt-1 ${c.color}`}>{formatNumber(c.qty)}</p>
+                  <p className="text-slate-500 text-[10px] mt-1">kg · {c.lots} Lot</p>
+                </div>
+              ))}
             </div>
           </div>
         )
@@ -415,7 +522,7 @@ export default function Warehouse() {
                     {/* Extrusion */}
                     {ext.goodQty !== undefined && (
                       <div className="space-y-0.5">
-                        <p className="text-slate-500 text-[10px] uppercase tracking-wider">Extrusion</p>
+                        <p className="text-slate-500 text-[10px] uppercase tracking-wider">Blow</p>
                         <div className="flex justify-between">
                           <span className="text-green-400">✓ ม้วนดี{ext.goodRolls ? ` ${ext.goodRolls} ม้วน` : ''}</span>
                           <span className="text-green-300">{formatNumber(ext.goodQty)} kg</span>
@@ -552,6 +659,145 @@ export default function Warehouse() {
                 </tr>
               </tbody>
             </table>
+          </div>
+        )
+      })()}
+
+      {/* ── ตารางยอดรับ-ส่ง (Full Flow) ──────────────────────────────── */}
+      {(() => {
+        type RecRow = {
+          soId: string
+          soNo: string
+          productName: string
+          unit: string
+          soQty: number          // ยอด SO (ลูกค้าสั่ง)
+          plannedQty: number     // ยอดสั่งผลิต (planning job)
+          stockQty: number       // มีในสต็อกแล้ว (stock_qty บน SO)
+          blownQty: number       // เป่าส่งคลัง (good_qty จาก production log)
+          warehouseQty: number   // คลังรับจริง (warehouse_stock)
+          dispatchedQty: number  // ส่งออกจริง
+          diff: number           // ผลต่าง (warehouseQty - dispatchedQty)
+        }
+
+        // รวบรวม SO id จากทุกแหล่ง
+        const soIds = new Set<string>()
+        goodStock.forEach(s => { if (s.planning_job?.sale_order_id) soIds.add(s.planning_job.sale_order_id) })
+        dispatchedReqs.forEach(r => { if (r.sale_order_id) soIds.add(r.sale_order_id) })
+        ;(jobs ?? []).filter(j => j.status === 'done' || j.status === 'pending_receipt').forEach(j => soIds.add(j.sale_order_id))
+
+        const rows: RecRow[] = Array.from(soIds).map(soId => {
+          // หา SO info
+          const soJobs = (jobs ?? []).filter(j => j.sale_order_id === soId)
+          const so = soJobs[0]?.sale_order ?? dispatchedReqs.find(r => r.sale_order_id === soId)?.sale_order
+
+          // ยอดสั่งผลิต = extrusion job planned_qty
+          const extJob = soJobs.find(j => j.dept === 'extrusion')
+          const plannedQty = extJob?.planned_qty ?? 0
+
+          // มีในสต็อก = stock_qty บน SO (กรอกตอนวางแผน)
+          const stockQty = (so as any)?.stock_qty ?? 0
+
+          // เป่าส่งคลัง = good output จาก production (ext + grd + prt)
+          const { ext, grd, prt } = getSoProductionSummary(soId)
+          const prtCalc  = prt ? (prt.inputQty - prt.wasteQty) : undefined
+          const blownQty = prtCalc ?? prt?.goodQty ?? ((ext.goodQty ?? 0) + (grd?.goodQty ?? 0)) || plannedQty
+
+          // คลังรับจริง = ยังอยู่ในคลัง
+          const warehouseQty = goodStock
+            .filter(s => s.planning_job?.sale_order_id === soId)
+            .reduce((s, w) => s + w.qty, 0)
+
+          // ส่งออกจริง = dispatched req
+          const dispReqs = dispatchedReqs.filter(r => r.sale_order_id === soId)
+          const dispatchedQty = dispReqs.reduce((sum, r) => {
+            const items: { stock_id: string; qty: number }[] = (r as any).items ?? []
+            const real = items.filter(i => i.stock_id !== '__stock_portion__' && !i.stock_id.startsWith('manual-'))
+            return sum + (real.length > 0 ? real.reduce((s, i) => s + (i.qty ?? 0), 0) : (r.sale_order?.qty ?? 0))
+          }, 0)
+
+          return {
+            soId,
+            soNo: so?.so_no ?? soId.slice(0, 8),
+            productName: so?.product?.part_name ?? '-',
+            unit: so?.unit ?? 'kg',
+            soQty: so?.qty ?? 0,
+            plannedQty,
+            stockQty,
+            blownQty,
+            warehouseQty,
+            dispatchedQty,
+            diff: (so?.qty ?? 0) - dispatchedQty,   // ยอด SO − ส่งออกจริง = ยังค้างส่ง
+          }
+        }).filter(r => r.soQty > 0)
+
+        if (rows.length === 0) return null
+
+        const totals = rows.reduce((acc, r) => ({
+          soQty: acc.soQty + r.soQty,
+          plannedQty: acc.plannedQty + r.plannedQty,
+          stockQty: acc.stockQty + r.stockQty,
+          blownQty: acc.blownQty + r.blownQty,
+          warehouseQty: acc.warehouseQty + r.warehouseQty,
+          dispatchedQty: acc.dispatchedQty + r.dispatchedQty,
+          diff: acc.diff + r.diff,
+        }), { soQty: 0, plannedQty: 0, stockQty: 0, blownQty: 0, warehouseQty: 0, dispatchedQty: 0, diff: 0 })
+
+        return (
+          <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between">
+              <span className="text-white font-medium text-sm">ยอดรับ-ส่ง (Full Flow)</span>
+              <span className="text-slate-500 text-xs">{rows.length} SO</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-800 bg-slate-800/40">
+                    <th className="text-left px-4 py-2.5 text-slate-400 font-medium text-xs whitespace-nowrap">SO No.</th>
+                    <th className="text-left px-4 py-2.5 text-slate-400 font-medium text-xs">สินค้า</th>
+                    <th className="text-right px-4 py-2.5 text-slate-400 font-medium text-xs whitespace-nowrap">ยอด SO</th>
+                    <th className="text-right px-4 py-2.5 text-sky-400 font-medium text-xs whitespace-nowrap">ยอดสั่งผลิต</th>
+                    <th className="text-right px-4 py-2.5 text-slate-400 font-medium text-xs whitespace-nowrap">มีในสต็อก</th>
+                    <th className="text-right px-4 py-2.5 text-brand-400 font-medium text-xs whitespace-nowrap">เป่าส่งคลัง</th>
+                    <th className="text-right px-4 py-2.5 text-green-400 font-medium text-xs whitespace-nowrap">คลังรับจริง</th>
+                    <th className="text-right px-4 py-2.5 text-blue-400 font-medium text-xs whitespace-nowrap">ส่งออกจริง</th>
+                    <th className="text-right px-4 py-2.5 text-slate-400 font-medium text-xs whitespace-nowrap">ค้างส่ง</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {rows.map(r => (
+                    <tr key={r.soId} className="hover:bg-slate-800/30 transition-colors">
+                      <td className="px-4 py-2.5 text-white font-semibold text-sm whitespace-nowrap">{r.soNo}</td>
+                      <td className="px-4 py-2.5 text-slate-300 text-xs max-w-[160px] truncate">{r.productName}</td>
+                      <td className="px-4 py-2.5 text-right text-slate-300 text-sm">{formatNumber(r.soQty)}</td>
+                      <td className="px-4 py-2.5 text-right text-sky-300 text-sm">{r.plannedQty > 0 ? formatNumber(r.plannedQty) : '—'}</td>
+                      <td className="px-4 py-2.5 text-right text-slate-400 text-sm">{r.stockQty > 0 ? formatNumber(r.stockQty) : '—'}</td>
+                      <td className="px-4 py-2.5 text-right text-brand-300 text-sm">{r.blownQty > 0 ? formatNumber(r.blownQty) : '—'}</td>
+                      <td className="px-4 py-2.5 text-right text-green-300 font-semibold text-sm">{r.warehouseQty > 0 ? formatNumber(r.warehouseQty) : '—'}</td>
+                      <td className="px-4 py-2.5 text-right text-blue-300 text-sm">{r.dispatchedQty > 0 ? formatNumber(r.dispatchedQty) : '—'}</td>
+                      <td className="px-4 py-2.5 text-right font-bold text-sm">
+                        {r.diff === 0
+                          ? <span className="text-slate-500">0</span>
+                          : r.diff > 0
+                            ? <span className="text-white">+{formatNumber(r.diff)}</span>
+                            : <span className="text-red-400">{formatNumber(r.diff)}</span>}
+                      </td>
+                    </tr>
+                  ))}
+                  <tr className="bg-slate-800/60 border-t-2 border-slate-700 font-semibold">
+                    <td colSpan={2} className="px-4 py-2.5 text-slate-300 text-sm">รวมทั้งหมด</td>
+                    <td className="px-4 py-2.5 text-right text-slate-300 text-sm">{formatNumber(totals.soQty)}</td>
+                    <td className="px-4 py-2.5 text-right text-sky-300 text-sm">{formatNumber(totals.plannedQty)}</td>
+                    <td className="px-4 py-2.5 text-right text-slate-400 text-sm">{formatNumber(totals.stockQty)}</td>
+                    <td className="px-4 py-2.5 text-right text-brand-300 text-sm">{formatNumber(totals.blownQty)}</td>
+                    <td className="px-4 py-2.5 text-right text-green-300 text-sm">{formatNumber(totals.warehouseQty)}</td>
+                    <td className="px-4 py-2.5 text-right text-blue-300 text-sm">{formatNumber(totals.dispatchedQty)}</td>
+                    <td className={`px-4 py-2.5 text-right text-sm ${totals.diff >= 0 ? 'text-white' : 'text-red-400'}`}>
+                      {totals.diff >= 0 ? '+' : ''}{formatNumber(totals.diff)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         )
       })()}
@@ -877,43 +1123,157 @@ export default function Warehouse() {
       {/* Receive Modal */}
       {receiveModal && (() => {
         const { ext, grd, prt, totalLoss } = getSoProductionSummary(receiveModal.sale_order_id)
-        // ยอดรับ = input พิม - เศษพิม → good_qty พิม → (good เป่า + กรอคืน) → planned_qty
-        const prtCalc = prt ? (prt.inputQty - prt.wasteQty) : undefined
-        const receiveQty  = prtCalc ?? prt?.goodQty
+        const prtCalc      = prt ? (prt.inputQty - prt.wasteQty) : undefined
+        const calcQty      = prtCalc ?? prt?.goodQty
           ?? ((ext.goodQty ?? 0) + (grd?.goodQty ?? 0) || receiveModal.planned_qty)
-        const extRolls_ = (ext.goodRolls ?? 0) + (grd?.goodRolls ?? 0)
-        const receiveRolls = prt?.goodRolls ?? (extRolls_ > 0 ? extRolls_ : undefined)
-        const soPlanned   = receiveModal.sale_order?.qty ?? receiveModal.planned_qty
+        const extRolls_    = (ext.goodRolls ?? 0) + (grd?.goodRolls ?? 0)
+        const calcRolls    = prt?.goodRolls ?? (extRolls_ > 0 ? extRolls_ : undefined)
+        const soPlanned    = receiveModal.sale_order?.qty ?? receiveModal.planned_qty
+        const finalQty     = actualQty ? parseFloat(actualQty) : calcQty
+        const finalRolls   = actualRolls ? parseInt(actualRolls) : calcRolls
+        const isDiff       = actualQty !== '' && Math.abs(parseFloat(actualQty) - calcQty) > 0.01
+
+        function handlePrintInspection() {
+          const date = new Date().toLocaleString('th-TH', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+          printDocument(`ใบตรวจรับสินค้า — ${receiveModal!.sale_order?.so_no}`, `
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:10px;margin-bottom:14px">
+              <div><div style="font-size:16px;font-weight:800">FlowPro</div><div style="font-size:10px;color:#888">ระบบจัดการการผลิต</div></div>
+              <div style="text-align:right">
+                <div style="font-size:18px;font-weight:800">ใบตรวจรับสินค้า</div>
+                <div style="font-size:10px;color:#888">พิมพ์เมื่อ: ${date}</div>
+              </div>
+            </div>
+            <table style="margin-bottom:16px">
+              <thead><tr><th colspan="2" style="background:#f8fafc;text-align:left;padding:6px 8px;font-size:11px">ข้อมูลการผลิต</th></tr></thead>
+              <tbody>
+                <tr><td style="width:40%;color:#888">SO No.</td><td style="font-weight:700">${receiveModal!.sale_order?.so_no ?? '-'}</td></tr>
+                <tr><td style="color:#888">Lot No.</td><td style="font-weight:700">${receiveModal!.lot_no ?? '-'}</td></tr>
+                <tr><td style="color:#888">ลูกค้า</td><td>${receiveModal!.sale_order?.customer?.name ?? '-'}</td></tr>
+                <tr><td style="color:#888">สินค้า</td><td>${receiveModal!.sale_order?.product?.part_name ?? '-'}</td></tr>
+                <tr><td style="color:#888">ยอด SO</td><td>${formatNumber(soPlanned)} ${receiveModal!.sale_order?.unit ?? 'kg'}</td></tr>
+              </tbody>
+            </table>
+            <h2>สรุปผลการผลิต (จากระบบ)</h2>
+            <table style="margin-bottom:16px">
+              <thead><tr><th>รายการ</th><th style="text-align:right">จำนวน (kg)</th><th style="text-align:right">ม้วน</th></tr></thead>
+              <tbody>
+                ${ext.goodQty !== undefined ? `<tr><td>ม้วนดีจากเป่า</td><td style="text-align:right">${formatNumber(ext.goodQty)}</td><td style="text-align:right">${ext.goodRolls ?? '-'}</td></tr>` : ''}
+                ${grd && grd.goodQty > 0 ? `<tr><td>กรอคืน</td><td style="text-align:right">+${formatNumber(grd.goodQty)}</td><td style="text-align:right">${grd.goodRolls ?? '-'}</td></tr>` : ''}
+                ${prt && prt.goodQty !== undefined ? `<tr><td>ม้วนพิมพ์</td><td style="text-align:right">${formatNumber(prt.goodQty!)}</td><td style="text-align:right">${prt.goodRolls ?? '-'}</td></tr>` : ''}
+                ${ext.wasteQty > 0 ? `<tr><td style="color:#dc2626">เศษเป่า</td><td style="text-align:right;color:#dc2626">${formatNumber(ext.wasteQty)}</td><td></td></tr>` : ''}
+                ${grd && grd.wasteQty > 0 ? `<tr><td style="color:#dc2626">เศษกรอ</td><td style="text-align:right;color:#dc2626">${formatNumber(grd.wasteQty)}</td><td></td></tr>` : ''}
+                ${prt && prt.wasteQty > 0 ? `<tr><td style="color:#dc2626">เศษพิมพ์</td><td style="text-align:right;color:#dc2626">${formatNumber(prt.wasteQty)}</td><td></td></tr>` : ''}
+                <tr class="total-row"><td>ยอดรับเข้าคลัง (ระบบ)</td><td style="text-align:right">${formatNumber(calcQty)}</td><td style="text-align:right">${calcRolls ?? '-'}</td></tr>
+              </tbody>
+            </table>
+            <h2>บันทึกการตรวจรับ (คลังกรอก)</h2>
+            <table>
+              <thead><tr><th>รายการ</th><th style="text-align:right">ตามระบบ</th><th style="text-align:right">นับจริง</th><th style="text-align:right">ผลต่าง</th><th>หมายเหตุ</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td>จำนวน (kg)</td>
+                  <td style="text-align:right">${formatNumber(calcQty)}</td>
+                  <td style="text-align:right;border-bottom:1px solid #111;min-width:80px">&nbsp;</td>
+                  <td style="text-align:right;border-bottom:1px solid #111;min-width:60px">&nbsp;</td>
+                  <td style="border-bottom:1px solid #111;min-width:120px">&nbsp;</td>
+                </tr>
+                <tr>
+                  <td>จำนวนม้วน</td>
+                  <td style="text-align:right">${calcRolls ?? '-'}</td>
+                  <td style="text-align:right;border-bottom:1px solid #111">&nbsp;</td>
+                  <td style="text-align:right;border-bottom:1px solid #111">&nbsp;</td>
+                  <td style="border-bottom:1px solid #111">&nbsp;</td>
+                </tr>
+                <tr><td>ตำแหน่งจัดเก็บ</td><td colspan="4" style="border-bottom:1px solid #111">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</td></tr>
+              </tbody>
+            </table>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-top:40px">
+              ${['ผู้ตรวจรับ (คลัง)','ผู้ส่งมอบ (ผลิต)','ผู้อนุมัติ'].map(l => `
+                <div style="text-align:center">
+                  <div style="height:48px"></div>
+                  <div style="border-top:1px solid #aaa;padding-top:4px;font-size:10px;color:#777">${l}</div>
+                </div>`).join('')}
+            </div>
+          `)
+        }
+
         return (
           <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-            <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm">
+            <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md">
               <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
-                <h2 className="text-white font-semibold">รับเข้าคลัง</h2>
+                <div>
+                  <h2 className="text-white font-semibold">รับเข้าคลัง</h2>
+                  <p className="text-slate-400 text-xs mt-0.5">SO {receiveModal.sale_order?.so_no} · Lot {receiveModal.lot_no}</p>
+                </div>
                 <button onClick={() => setReceiveModal(null)} className="text-slate-400 hover:text-white"><X size={18} /></button>
               </div>
-              <div className="p-6 space-y-4">
-                {/* สรุปการผลิต */}
-                <div className="bg-slate-800 rounded-lg p-3 text-xs space-y-1.5">
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="text-slate-400">SO {receiveModal.sale_order?.so_no}</span>
-                    <span className="text-white">{formatNumber(soPlanned)} kg</span>
+
+              <div className="p-5 space-y-4">
+                {/* ── ขั้นตอนที่ 1: พิมพ์ใบตรวจ ── */}
+                <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl px-4 py-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-blue-300 text-sm font-semibold">ขั้นตอนที่ 1 — พิมพ์ใบตรวจรับ</p>
+                      <p className="text-slate-400 text-xs mt-0.5">พิมพ์แล้วนำไปเช็คสินค้ากับของจริง</p>
+                    </div>
+                    <button
+                      onClick={handlePrintInspection}
+                      className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded-lg transition-colors font-medium"
+                    >
+                      <Printer size={14} /> พิมพ์ใบตรวจรับ
+                    </button>
                   </div>
-                  <p className="text-slate-500">Lot: {receiveModal.lot_no}</p>
-                  <div className="border-t border-slate-700 pt-1.5 space-y-1">
+                </div>
+
+                {/* ── สรุปการผลิตจากระบบ ── */}
+                <div className="bg-slate-800 rounded-xl p-3 text-xs space-y-1.5">
+                  <p className="text-slate-400 font-medium text-[11px] uppercase tracking-wider mb-2">ยอดจากระบบ (ผลผลิตจริง)</p>
+                  <div className="space-y-1">
                     {ext.goodQty !== undefined && <div className="flex justify-between"><span className="text-slate-400">เป่าได้{ext.goodRolls ? ` ${ext.goodRolls} ม้วน` : ''}</span><span className="text-slate-300">{formatNumber(ext.goodQty)} kg</span></div>}
                     {ext.badQty > 0 && <div className="flex justify-between"><span className="text-slate-500">⚙ กรอคืน</span><span className="text-slate-500">+{formatNumber(grd?.goodQty ?? 0)} kg</span></div>}
                     {ext.wasteQty > 0 && <div className="flex justify-between"><span className="text-red-400">✗ เศษเป่า</span><span className="text-red-300">{formatNumber(ext.wasteQty)} kg</span></div>}
                     {grd && grd.wasteQty > 0 && <div className="flex justify-between"><span className="text-red-400">✗ เศษกรอ</span><span className="text-red-300">{formatNumber(grd.wasteQty)} kg</span></div>}
                     {prt && prt.wasteQty > 0 && <div className="flex justify-between"><span className="text-red-400">✗ เศษพิม</span><span className="text-red-300">{formatNumber(prt.wasteQty)} kg</span></div>}
                     {totalLoss > 0 && <div className="flex justify-between text-red-400 border-t border-slate-700 pt-1"><span>รวมเสีย</span><span>{formatNumber(totalLoss)} kg</span></div>}
+                    <div className="flex justify-between text-green-300 border-t border-slate-700 pt-1 font-semibold">
+                      <span>ยอดรับ (ระบบ)</span>
+                      <span>{formatNumber(calcQty)} kg{calcRolls ? ` · ${calcRolls} ม้วน` : ''}</span>
+                    </div>
                   </div>
                 </div>
 
-                {/* ยอดรับ — อ้างอิงจากผลิตจริง */}
-                <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4 text-center">
-                  <p className="text-slate-400 text-xs mb-1">รับเข้าคลัง (ยอดผลิตจริง)</p>
-                  <p className="text-green-300 text-2xl font-bold">{formatNumber(receiveQty)} kg</p>
-                  {receiveRolls && <p className="text-green-400 text-sm mt-0.5">{receiveRolls} ม้วน</p>}
+                {/* ── ขั้นตอนที่ 2: คีย์ยอดจริง ── */}
+                <div className="space-y-2">
+                  <p className="text-slate-300 text-sm font-semibold">ขั้นตอนที่ 2 — คีย์ยอดตามจริง <span className="text-slate-500 font-normal text-xs">(ถ้าไม่ตรง)</span></p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1">จำนวนจริง (kg)</label>
+                      <input
+                        type="number"
+                        value={actualQty}
+                        onChange={e => setActualQty(e.target.value)}
+                        placeholder={calcQty.toFixed(2)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 outline-none focus:border-brand-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1">จำนวนม้วนจริง</label>
+                      <input
+                        type="number"
+                        value={actualRolls}
+                        onChange={e => setActualRolls(e.target.value)}
+                        placeholder={calcRolls?.toString() ?? '0'}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 outline-none focus:border-brand-500"
+                      />
+                    </div>
+                  </div>
+                  {isDiff && (
+                    <div className="flex items-center gap-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg px-3 py-2 text-xs">
+                      <span className="text-yellow-300 font-medium">ผลต่าง:</span>
+                      <span className="text-yellow-200">{(parseFloat(actualQty) - calcQty).toFixed(2)} kg</span>
+                      <span className="text-slate-500">จากระบบ {formatNumber(calcQty)} kg</span>
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -926,10 +1286,25 @@ export default function Warehouse() {
                   />
                 </div>
 
+                {/* ยอดที่จะบันทึก */}
+                <div className={`rounded-xl px-4 py-3 text-center border ${isDiff ? 'bg-yellow-500/10 border-yellow-500/30' : 'bg-green-500/10 border-green-500/30'}`}>
+                  <p className="text-slate-400 text-xs mb-1">
+                    {isDiff ? 'ยอดที่จะบันทึก (ตามจริง)' : 'ยอดที่จะบันทึก (ตามระบบ)'}
+                  </p>
+                  <p className={`text-2xl font-bold ${isDiff ? 'text-yellow-300' : 'text-green-300'}`}>
+                    {formatNumber(finalQty)} kg
+                  </p>
+                  {finalRolls && <p className={`text-sm mt-0.5 ${isDiff ? 'text-yellow-400' : 'text-green-400'}`}>{finalRolls} ม้วน</p>}
+                </div>
+
                 <div className="flex gap-3">
-                  <button onClick={() => setReceiveModal(null)} className="flex-1 bg-slate-800 hover:bg-slate-700 text-white py-2 rounded-lg text-sm">ยกเลิก</button>
-                  <button onClick={handleReceive} disabled={receive.isPending} className="flex-1 bg-yellow-600 hover:bg-yellow-700 disabled:opacity-50 text-white py-2 rounded-lg text-sm font-medium transition-colors">
-                    {receive.isPending ? 'กำลังบันทึก...' : `ยืนยันรับเข้า ${formatNumber(receiveQty)} kg`}
+                  <button onClick={() => setReceiveModal(null)} className="flex-1 bg-slate-800 hover:bg-slate-700 text-white py-2.5 rounded-lg text-sm">ยกเลิก</button>
+                  <button
+                    onClick={() => handleReceive(calcQty)}
+                    disabled={receive.isPending}
+                    className={`flex-1 disabled:opacity-50 text-white py-2.5 rounded-lg text-sm font-medium transition-colors ${isDiff ? 'bg-yellow-600 hover:bg-yellow-700' : 'bg-green-600 hover:bg-green-700'}`}
+                  >
+                    {receive.isPending ? 'กำลังบันทึก...' : `ยืนยันรับเข้า ${formatNumber(finalQty)} kg`}
                   </button>
                 </div>
               </div>

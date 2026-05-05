@@ -178,7 +178,7 @@ export default function Dashboard() {
           {[
             { label: 'Sale Order',   value: orders?.length ?? 0,                                             sub: `${formatNumber(totalSOQty)} kg`,        color: 'bg-blue-500/20 border-blue-500/40 text-blue-300',   dot: 'bg-blue-500' },
             { label: 'Planning',     value: jobs?.filter(j=>['queued','ongoing'].includes(j.status)).length ?? 0, sub: 'รอ / กำลังผลิต',                  color: 'bg-sky-500/20 border-sky-500/40 text-sky-300',      dot: 'bg-sky-500' },
-            { label: 'Extrusion',    value: jobs?.filter(j=>j.dept==='extrusion'&&j.status==='ongoing').length ?? 0, sub: `ม้วนกรอ ${formatNumber(totalBadQty)} kg`, color: 'bg-brand-500/20 border-brand-500/40 text-brand-300', dot: 'bg-brand-500' },
+            { label: 'Blow',         value: jobs?.filter(j=>j.dept==='extrusion'&&j.status==='ongoing').length ?? 0, sub: `ม้วนกรอ ${formatNumber(totalBadQty)} kg`, color: 'bg-brand-500/20 border-brand-500/40 text-brand-300', dot: 'bg-brand-500' },
             { label: 'Grinding',     value: grdJobs.filter(j=>['queued','ongoing'].includes(j.status)).length, sub: `คืนได้ ${formatNumber(grdGoodQty)} kg`, color: 'bg-orange-500/20 border-orange-500/40 text-orange-300', dot: 'bg-orange-500' },
             { label: 'Printing',     value: jobs?.filter(j=>j.dept==='printing'&&j.status==='ongoing').length ?? 0, sub: 'ม้วนพิมพ์',                     color: 'bg-purple-500/20 border-purple-500/40 text-purple-300', dot: 'bg-purple-500' },
             { label: 'คลังสินค้า',  value: stock?.filter(s=>s.condition==='good').length ?? 0,               sub: `${formatNumber(goodStock)} kg`,         color: 'bg-yellow-500/20 border-yellow-500/40 text-yellow-300', dot: 'bg-yellow-500' },
@@ -365,7 +365,7 @@ export default function Dashboard() {
 
               {/* Extrusion */}
               <DeptCard
-                title="Extrusion"
+                title="Blow"
                 icon={<Wind size={15} className="text-brand-400" />}
                 color="border-brand-500/20"
                 yield={extYield}

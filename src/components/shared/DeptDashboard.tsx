@@ -39,7 +39,7 @@ export default function DeptDashboard({ dept, jobs, logs }: Props) {
         <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800">
           <div className="flex items-center gap-2">
             <Wind size={15} className="text-brand-400" />
-            <span className="text-white font-semibold text-sm">สถิติ Extrusion</span>
+            <span className="text-white font-semibold text-sm">สถิติ Blow</span>
           </div>
           <div className="flex items-center gap-3">
             <span className="text-slate-400 text-xs">งาน active <span className="text-sky-300 font-bold">{active}</span></span>

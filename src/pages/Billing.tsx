@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react'
-import { Plus, FileText, X, Printer } from 'lucide-react'
+import { Plus, FileText, X, Printer, Download } from 'lucide-react'
+import { downloadCSV } from '../lib/csvUtils'
 import { useInvoices, useCreateInvoice, useUpdateInvoiceStatus } from '../hooks/useBilling'
 import { useRequisitions } from '../hooks/useSales'
 import { useSaleOrders } from '../hooks/useSaleOrders'
@@ -368,9 +369,25 @@ export default function Billing() {
           <h1 className="text-xl font-bold text-white">Billing</h1>
           <p className="text-slate-400 text-sm mt-0.5">ใบแจ้งหนี้และการชำระเงิน</p>
         </div>
-        <button onClick={openForm} className="flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm px-4 py-2 rounded-lg transition-colors">
-          <Plus size={15} /> ออกใบแจ้งหนี้
-        </button>
+        <div className="flex items-center gap-2 no-print">
+          <button
+            onClick={() => {
+              const headers = ['Invoice No.','SO No.','ลูกค้า','ยอดก่อน VAT','VAT 7%','ยอดรวม','วันที่ออก','สถานะ']
+              const rows = (invoices ?? []).map(inv => [
+                inv.invoice_no ?? '', inv.sale_order?.so_no ?? '', inv.sale_order?.customer?.name ?? '',
+                inv.subtotal ?? '', inv.vat_amount ?? '', inv.total_amount ?? '',
+                formatDate(inv.issued_date), inv.status,
+              ])
+              downloadCSV(`invoices_${new Date().toISOString().slice(0,10)}.csv`, headers, rows)
+            }}
+            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white text-sm px-3 py-2 rounded-lg transition-colors"
+          >
+            <Download size={15} /> Export
+          </button>
+          <button onClick={openForm} className="flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm px-4 py-2 rounded-lg transition-colors">
+            <Plus size={15} /> ออกใบแจ้งหนี้
+          </button>
+        </div>
       </div>
 
       {/* Stats */}

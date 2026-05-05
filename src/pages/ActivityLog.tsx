@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
 import {
   ShoppingCart, ClipboardList, Wind, Package, Truck, Search,
-  CheckCircle2, Cog, Printer, ChevronDown, ChevronRight,
+  CheckCircle2, Cog, Printer, ChevronDown, ChevronRight, Download, FileText,
 } from 'lucide-react'
+import { downloadCSV, printDocument } from '../lib/csvUtils'
 import { useSaleOrders } from '../hooks/useSaleOrders'
 import { usePlanningJobs } from '../hooks/usePlanning'
 import { useProductionLogs } from '../hooks/useProduction'
@@ -39,7 +40,7 @@ const EVENT_CFG: Record<EventType, { color: string; bg: string; border: string; 
 function deptLabel(dept?: string) {
   if (dept === 'printing') return <span className="flex items-center gap-0.5 text-purple-300 text-[10px]"><Printer size={9} /> Printing</span>
   if (dept === 'grinding') return <span className="flex items-center gap-0.5 text-orange-300 text-[10px]"><Cog size={9} /> Grinding</span>
-  if (dept === 'extrusion') return <span className="flex items-center gap-0.5 text-brand-300 text-[10px]"><Wind size={9} /> Extrusion</span>
+  if (dept === 'extrusion') return <span className="flex items-center gap-0.5 text-brand-300 text-[10px]"><Wind size={9} /> Blow</span>
   return null
 }
 
@@ -90,7 +91,7 @@ export default function ActivityLog() {
       soJobs.forEach(j => {
         events.push({
           id: `job-${j.id}`, type: 'job_planned', timestamp: j.created_at, dept: j.dept,
-          label: `วางแผน ${j.dept === 'printing' ? 'Printing' : j.dept === 'grinding' ? 'Grinding' : 'Extrusion'}`,
+          label: `วางแผน ${j.dept === 'printing' ? 'Printing' : j.dept === 'grinding' ? 'Grinding' : 'Blow'}`,
           detail: `${j.lot_no} · ${formatNumber(j.planned_qty)} kg${j.machine_no ? ` · ${j.machine_no}` : ''}`,
           qty: j.planned_qty, unit: 'kg',
         })
@@ -106,7 +107,7 @@ export default function ActivityLog() {
           ].filter(Boolean).join(' · ')
           events.push({
             id: `log-${log.id}`, type: 'production_done', timestamp: log.finished_at ?? log.created_at, dept: j.dept,
-            label: `บันทึกผล ${j.dept === 'printing' ? 'Printing' : j.dept === 'grinding' ? 'Grinding' : 'Extrusion'}`,
+            label: `บันทึกผล ${j.dept === 'printing' ? 'Printing' : j.dept === 'grinding' ? 'Grinding' : 'Blow'}`,
             detail: parts, qty: log.good_qty ?? undefined, unit: 'kg',
           })
         }
@@ -162,9 +163,50 @@ export default function ActivityLog() {
   return (
     <div className="p-6 space-y-5">
       {/* Header */}
-      <div>
-        <h1 className="text-xl font-bold text-white">Activity Log</h1>
-        <p className="text-slate-400 text-sm mt-0.5">ประวัติกิจกรรมทั้งหมด จัดกลุ่มตาม SO</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-bold text-white">Activity Log</h1>
+          <p className="text-slate-400 text-sm mt-0.5">ประวัติกิจกรรมทั้งหมด จัดกลุ่มตาม SO</p>
+        </div>
+        <div className="flex items-center gap-2 no-print">
+          <button
+            onClick={() => {
+              const headers = ['SO No.','ลูกค้า','สินค้า','ประเภทกิจกรรม','รายละเอียด','จำนวน','หน่วย','เวลา','แผนก']
+              const rows = soMap.flatMap(s => s.events.map(ev => [
+                s.so_no, s.customer, s.product, ev.label, ev.detail ?? '',
+                ev.qty ?? '', ev.unit ?? '', new Date(ev.timestamp).toLocaleString('th-TH'), ev.dept ?? '',
+              ]))
+              downloadCSV(`activity_log_${new Date().toISOString().slice(0,10)}.csv`, headers, rows)
+            }}
+            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white text-sm px-3 py-2 rounded-lg transition-colors"
+          >
+            <Download size={15} /> Export
+          </button>
+          <button
+            onClick={() => {
+              const date = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })
+              printDocument('Activity Log', `
+                <h1>Activity Log</h1>
+                <p class="meta">วันที่พิมพ์: ${date} · ${soMap.length} SO</p>
+                ${soMap.map(s => `
+                  <h2>${s.so_no} — ${s.customer}</h2>
+                  <p class="meta">${s.product} · สถานะ: ${s.status}</p>
+                  <table>
+                    <thead><tr><th>กิจกรรม</th><th>รายละเอียด</th><th>จำนวน</th><th>เวลา</th></tr></thead>
+                    <tbody>${s.events.map(ev => `<tr>
+                      <td>${ev.label}</td><td>${ev.detail ?? '-'}</td>
+                      <td style="text-align:right">${ev.qty ? `${ev.qty.toLocaleString()} ${ev.unit ?? ''}` : '-'}</td>
+                      <td>${new Date(ev.timestamp).toLocaleString('th-TH')}</td>
+                    </tr>`).join('')}</tbody>
+                  </table>
+                `).join('')}
+              `)
+            }}
+            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white text-sm px-3 py-2 rounded-lg transition-colors"
+          >
+            <FileText size={15} /> พิมพ์
+          </button>
+        </div>
       </div>
 
       {/* Stats */}
