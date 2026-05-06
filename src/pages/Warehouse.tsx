@@ -1,13 +1,14 @@
 import { useState, useRef } from 'react'
 import { X, PackagePlus, CheckCircle, ClipboardList, Truck, Wind, Printer, Download, Upload, FileText } from 'lucide-react'
 import { downloadCSV, downloadTemplate, parseCSV, printDocument } from '../lib/csvUtils'
-import { useWarehouseStock, useReceiveToStock } from '../hooks/useWarehouse'
+import { useWarehouseStock, useReceiveToStock, useAddManualStock } from '../hooks/useWarehouse'
 import { usePlanningJobs } from '../hooks/usePlanning'
 import { useProductionLogs } from '../hooks/useProduction'
 import { useRequisitions, useApproveRequisition, useDispatchRequisition, useCancelRequisition } from '../hooks/useSales'
 import { useAuth } from '../lib/AuthContext'
 import { formatDate, formatNumber } from '../lib/utils'
 import { TableSkeleton } from '../components/shared/LoadingSkeleton'
+import { useProducts } from '../hooks/useProducts'
 import type { PlanningJob, Requisition } from '../types'
 
 export default function Warehouse() {
@@ -16,12 +17,41 @@ export default function Warehouse() {
   const { data: jobs } = usePlanningJobs()
   const { data: logs } = useProductionLogs()
   const { data: reqs } = useRequisitions()
-  const receive     = useReceiveToStock()
-  const approveReq  = useApproveRequisition()
-  const dispatchReq = useDispatchRequisition()
-  const cancelReq   = useCancelRequisition()
+  const receive      = useReceiveToStock()
+  const addManual    = useAddManualStock()
+  const approveReq   = useApproveRequisition()
+  const dispatchReq  = useDispatchRequisition()
+  const cancelReq    = useCancelRequisition()
+  const { data: products } = useProducts()
 
   const [receiveModal, setReceiveModal] = useState<PlanningJob | null>(null)
+
+  // ── Manual stock modal ──────────────────────────────────────────────────────
+  const [showManualModal, setShowManualModal] = useState(false)
+  const [mProductId, setMProductId]   = useState('')
+  const [mLotNo, setMLotNo]           = useState('')
+  const [mQty, setMQty]               = useState('')
+  const [mUnit, setMUnit]             = useState('kg')
+  const [mLocation, setMLocation]     = useState('')
+  const [mRemark, setMRemark]         = useState('')
+
+  function openManualModal() {
+    setMProductId(''); setMLotNo(''); setMQty(''); setMUnit('kg'); setMLocation(''); setMRemark('')
+    setShowManualModal(true)
+  }
+
+  async function handleAddManual() {
+    if (!mProductId || !mQty || parseFloat(mQty) <= 0) return
+    const lotNo = mLotNo.trim() || `OLD-${Date.now().toString(36).toUpperCase()}`
+    await addManual.mutateAsync({
+      lot_no: lotNo,
+      product_id: mProductId,
+      qty: parseFloat(mQty),
+      unit: mUnit,
+      received_by: user?.id,
+    })
+    setShowManualModal(false)
+  }
   const [location, setLocation] = useState('')
   const [dispatchModal, setDispatchModal] = useState<Requisition | null>(null)
   const [supplements, setSupplements] = useState<{ stock_id: string; qty: number; label: string }[]>([])
@@ -184,6 +214,12 @@ export default function Warehouse() {
             title="ดาวน์โหลด Template CSV"
           >
             <Download size={15} /> Template
+          </button>
+          <button
+            onClick={openManualModal}
+            className="flex items-center gap-2 bg-amber-700 hover:bg-amber-600 text-white text-sm px-3 py-2 rounded-lg transition-colors"
+          >
+            <PackagePlus size={15} /> เพิ่มสต็อกคลังเก่า
           </button>
           <button
             onClick={() => csvInputRef.current?.click()}
@@ -802,74 +838,236 @@ export default function Warehouse() {
         )
       })()}
 
-      {/* Stock table — จัดกลุ่มตาม SO */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
-        <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
-          <span className="text-white font-medium text-sm">สต็อกปัจจุบัน</span>
-          <span className="text-slate-500 text-xs">{stock?.length ?? 0} Lot</span>
-        </div>
-        {stockLoading ? (
-          <div className="p-4"><TableSkeleton rows={4} /></div>
-        ) : !stock?.length ? (
-          <div className="py-10 text-center text-slate-500 text-sm">ยังไม่มีสต็อก</div>
-        ) : (() => {
-          // จัดกลุ่มตาม SO
-          type Group = { soNo: string; productName: string; totalQty: number; unit: string; lots: typeof stock }
-          const groups: Group[] = []
-          stock.forEach(s => {
-            const soFromJob = s.planning_job?.sale_order
-            let soNo = soFromJob?.so_no ?? ''
-            if (!soNo && s.lot_no.startsWith('STK-')) {
-              const parts = s.lot_no.split('-'); if (parts.length >= 2) soNo = parts[1]
-            }
-            const key = soNo || `_${s.id}`
-            const existing = groups.find(g => g.soNo === key)
-            if (existing) { existing.lots.push(s); existing.totalQty += s.qty }
-            else groups.push({ soNo: key, productName: s.product?.part_name ?? '-', unit: s.unit, totalQty: s.qty, lots: [s] })
-          })
-          return (
-            <div className="divide-y divide-slate-800">
-              {groups.map(g => (
-                <div key={g.soNo} className="px-5 py-3">
-                  {/* Group header */}
-                  <div className="flex items-center justify-between mb-1.5">
-                    <div>
-                      {!g.soNo.startsWith('_') && <span className="text-white text-sm font-bold mr-2">{g.soNo}</span>}
-                      <span className="text-slate-300 text-sm">{g.productName}</span>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-white font-bold text-sm">{formatNumber(g.totalQty)} {g.unit}</span>
-                      {g.lots.length > 1 && <span className="text-slate-500 text-xs ml-2">{g.lots.length} Lot</span>}
-                    </div>
-                  </div>
-                  {/* Individual lots */}
-                  <div className="space-y-0.5 pl-3 border-l-2 border-slate-700">
-                    {g.lots.map(s => (
-                      <div key={s.id} className="flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-3">
-                          <span className="text-slate-500 font-mono">{s.lot_no}</span>
-                          {s.location && <span className="text-slate-600">{s.location}</span>}
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <span className="text-slate-400">{formatNumber(s.qty)} {s.unit}</span>
-                          <span className="text-slate-600">{formatDate(s.received_at)}</span>
-                          <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${
-                            s.condition === 'good' ? 'bg-green-500/20 text-green-300' :
-                            s.condition === 'hold' ? 'bg-yellow-500/20 text-yellow-300' :
-                            'bg-red-500/20 text-red-300'
-                          }`}>
-                            {s.condition === 'good' ? 'ดี' : s.condition === 'hold' ? 'Hold' : 'Reject'}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
+      {/* ── สต็อกจากสายผลิต ─────────────────────────────────────────────── */}
+      {(() => {
+        const prodStock = goodStock.filter(s => !!s.planning_job_id)
+        type Group = { soNo: string; productName: string; totalQty: number; unit: string; lots: typeof prodStock }
+        const groups: Group[] = []
+        prodStock.forEach(s => {
+          const so = s.planning_job?.sale_order
+          const key = so?.so_no ?? `_${s.id}`
+          const existing = groups.find(g => g.soNo === key)
+          if (existing) { existing.lots.push(s); existing.totalQty += s.qty }
+          else groups.push({ soNo: key, productName: so?.product?.part_name ?? s.product?.part_name ?? '-', unit: s.unit, totalQty: s.qty, lots: [s] })
+        })
+        return (
+          <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between bg-slate-800/30">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-green-400" />
+                <span className="text-white font-medium text-sm">สต็อกจากสายผลิต</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-green-300 text-sm font-semibold">{formatNumber(prodStock.reduce((s,i)=>s+i.qty,0))} kg</span>
+                <span className="text-slate-500 text-xs">{prodStock.length} Lot</span>
+              </div>
             </div>
-          )
-        })()}
-      </div>
+            {stockLoading ? (
+              <div className="p-4"><TableSkeleton rows={3} /></div>
+            ) : prodStock.length === 0 ? (
+              <div className="py-8 text-center text-slate-500 text-sm">ยังไม่มีสต็อกจากสายผลิต</div>
+            ) : (
+              <div className="divide-y divide-slate-800">
+                {groups.map(g => (
+                  <div key={g.soNo} className="px-5 py-3">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div>
+                        {!g.soNo.startsWith('_') && <span className="text-white text-sm font-bold mr-2">{g.soNo}</span>}
+                        <span className="text-slate-300 text-sm">{g.productName}</span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-white font-bold text-sm">{formatNumber(g.totalQty)} {g.unit}</span>
+                        {g.lots.length > 1 && <span className="text-slate-500 text-xs ml-2">{g.lots.length} Lot</span>}
+                      </div>
+                    </div>
+                    <div className="space-y-0.5 pl-3 border-l-2 border-green-800">
+                      {g.lots.map(s => (
+                        <div key={s.id} className="flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-3">
+                            <span className="text-slate-500 font-mono">{s.lot_no}</span>
+                            {s.location && <span className="text-slate-600">{s.location}</span>}
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="text-slate-400">{formatNumber(s.qty)} {s.unit}</span>
+                            <span className="text-slate-600">{formatDate(s.received_at)}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })()}
+
+      {/* ── สต็อกคลังเก่า (กรอกด้วยมือ) ──────────────────────────────────── */}
+      {(() => {
+        const oldStock = goodStock.filter(s => !s.planning_job_id)
+        type OldGroup = { productName: string; totalQty: number; unit: string; lots: typeof oldStock }
+        const groups: OldGroup[] = []
+        oldStock.forEach(s => {
+          const key = s.product?.part_name ?? s.product_id
+          const existing = groups.find(g => g.productName === key)
+          if (existing) { existing.lots.push(s); existing.totalQty += s.qty }
+          else groups.push({ productName: s.product?.part_name ?? '-', unit: s.unit, totalQty: s.qty, lots: [s] })
+        })
+        return (
+          <div className="bg-slate-900 border-2 border-amber-600/40 rounded-xl overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-amber-600/30 flex items-center justify-between bg-amber-500/5">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-amber-400" />
+                <span className="text-amber-200 font-medium text-sm">สต็อกคลังเก่า</span>
+                <span className="text-amber-400/60 text-xs">(กรอกโดยคลัง — วางแผนดึงใช้ได้)</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-amber-300 text-sm font-semibold">{formatNumber(oldStock.reduce((s,i)=>s+i.qty,0))} kg</span>
+                <span className="text-slate-500 text-xs">{oldStock.length} Lot</span>
+                <button
+                  onClick={openManualModal}
+                  className="flex items-center gap-1.5 bg-amber-700 hover:bg-amber-600 text-white text-xs px-2.5 py-1.5 rounded-lg transition-colors"
+                >
+                  <PackagePlus size={12} /> เพิ่ม
+                </button>
+              </div>
+            </div>
+            {stockLoading ? (
+              <div className="p-4"><TableSkeleton rows={2} /></div>
+            ) : oldStock.length === 0 ? (
+              <div className="py-8 text-center">
+                <p className="text-slate-500 text-sm">ยังไม่มีสต็อกคลังเก่า</p>
+                <button onClick={openManualModal} className="mt-3 flex items-center gap-2 bg-amber-700 hover:bg-amber-600 text-white text-sm px-4 py-2 rounded-lg transition-colors mx-auto">
+                  <PackagePlus size={14} /> เพิ่มสต็อกคลังเก่า
+                </button>
+              </div>
+            ) : (
+              <div className="divide-y divide-amber-600/20">
+                {groups.map(g => (
+                  <div key={g.productName} className="px-5 py-3">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-amber-200 text-sm font-semibold">{g.productName}</span>
+                      <div className="text-right">
+                        <span className="text-amber-300 font-bold text-sm">{formatNumber(g.totalQty)} {g.unit}</span>
+                        {g.lots.length > 1 && <span className="text-slate-500 text-xs ml-2">{g.lots.length} Lot</span>}
+                      </div>
+                    </div>
+                    <div className="space-y-0.5 pl-3 border-l-2 border-amber-700">
+                      {g.lots.map(s => (
+                        <div key={s.id} className="flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-3">
+                            <span className="text-slate-500 font-mono">{s.lot_no}</span>
+                            {s.location && <span className="text-amber-700/80">{s.location}</span>}
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="text-amber-300/80">{formatNumber(s.qty)} {s.unit}</span>
+                            <span className="text-slate-600">{formatDate(s.received_at)}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })()}
+
+      {/* ── Manual Stock Modal ──────────────────────────────────────────── */}
+      {showManualModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-900 border-2 border-amber-600/40 rounded-2xl w-full max-w-md">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-amber-600/30 bg-amber-500/5 rounded-t-2xl">
+              <div>
+                <h2 className="text-amber-200 font-semibold">เพิ่มสต็อกคลังเก่า</h2>
+                <p className="text-slate-400 text-xs mt-0.5">กรอกสินค้าที่มีอยู่ก่อนเข้าระบบ — วางแผนจะดึงไปใช้ได้</p>
+              </div>
+              <button onClick={() => setShowManualModal(false)} className="text-slate-400 hover:text-white"><X size={18} /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              {/* สินค้า */}
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">สินค้า <span className="text-red-400">*</span></label>
+                <select
+                  value={mProductId}
+                  onChange={e => setMProductId(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-amber-500"
+                >
+                  <option value="">-- เลือกสินค้า --</option>
+                  {(products ?? []).map(p => (
+                    <option key={p.id} value={p.id}>{p.part_name} {p.item_code ? `(${p.item_code})` : ''}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Lot No. */}
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Lot No. <span className="text-slate-500">(ถ้าไม่กรอกระบบจะสร้างให้)</span></label>
+                <input
+                  value={mLotNo}
+                  onChange={e => setMLotNo(e.target.value)}
+                  placeholder="เช่น OLD-2024-001"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 outline-none focus:border-amber-500"
+                />
+              </div>
+
+              {/* จำนวน + หน่วย */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">จำนวน <span className="text-red-400">*</span></label>
+                  <input
+                    type="number"
+                    value={mQty}
+                    onChange={e => setMQty(e.target.value)}
+                    placeholder="0"
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">หน่วย</label>
+                  <select
+                    value={mUnit}
+                    onChange={e => setMUnit(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-amber-500"
+                  >
+                    <option value="kg">kg</option>
+                    <option value="roll">ม้วน</option>
+                    <option value="meter">เมตร</option>
+                    <option value="sheet">แผ่น</option>
+                    <option value="piece">ชิ้น</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* ตำแหน่ง */}
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">ตำแหน่งจัดเก็บ</label>
+                <input
+                  value={mLocation}
+                  onChange={e => setMLocation(e.target.value)}
+                  placeholder="เช่น A-01, ชั้น 2"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 outline-none focus:border-amber-500"
+                />
+              </div>
+
+              {(!mProductId || !mQty || parseFloat(mQty) <= 0) && (
+                <p className="text-amber-400/70 text-xs">* กรุณาเลือกสินค้าและกรอกจำนวน</p>
+              )}
+            </div>
+            <div className="flex gap-3 px-6 py-4 border-t border-slate-800">
+              <button onClick={() => setShowManualModal(false)} className="flex-1 bg-slate-800 hover:bg-slate-700 text-white py-2.5 rounded-lg text-sm">ยกเลิก</button>
+              <button
+                onClick={handleAddManual}
+                disabled={addManual.isPending || !mProductId || !mQty || parseFloat(mQty) <= 0}
+                className="flex-1 bg-amber-700 hover:bg-amber-600 disabled:opacity-50 text-white py-2.5 rounded-lg text-sm font-medium transition-colors"
+              >
+                {addManual.isPending ? 'กำลังบันทึก...' : 'เพิ่มสต็อกคลังเก่า'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Dispatch Modal */}
       {dispatchModal && (() => {
