@@ -374,9 +374,9 @@ export default function Billing() {
             onClick={() => {
               const headers = ['Invoice No.','SO No.','ลูกค้า','ยอดก่อน VAT','VAT 7%','ยอดรวม','วันที่ออก','สถานะ']
               const rows = (invoices ?? []).map(inv => [
-                inv.invoice_no ?? '', inv.sale_order?.so_no ?? '', inv.sale_order?.customer?.name ?? '',
-                inv.subtotal ?? '', inv.vat_amount ?? '', inv.total_amount ?? '',
-                formatDate(inv.issued_date), inv.status,
+                inv.id.slice(0,8), inv.sale_order?.so_no ?? '', inv.sale_order?.customer?.name ?? '',
+                inv.amount ?? '', inv.tax ?? '', inv.total ?? '',
+                formatDate(inv.issued_at), inv.status,
               ])
               downloadCSV(`invoices_${new Date().toISOString().slice(0,10)}.csv`, headers, rows)
             }}

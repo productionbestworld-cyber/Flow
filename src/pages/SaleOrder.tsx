@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react'
-import { Plus, Search, Edit2, Trash2, CheckCircle, X, Package, Printer, Upload, Download } from 'lucide-react'
+import { Plus, Search, Edit2, Trash2, CheckCircle, X, Printer, Upload, Download } from 'lucide-react'
 import { useSaleOrders, useCreateSaleOrder, useUpdateSaleOrder, useDeleteSaleOrder } from '../hooks/useSaleOrders'
 import { useCustomers } from '../hooks/useCustomers'
 import { useProducts } from '../hooks/useProducts'
@@ -308,7 +308,6 @@ function SHead({ children }: { children: React.ReactNode }) {
 
 function PrintSOModal({ so, onClose }: { so: SaleOrder; onClose: () => void }) {
   const printRef = useRef<HTMLDivElement>(null)
-  const productionQty = Math.max(0, so.qty - (so.stock_qty ?? 0))
   const unit = so.unit || 'kg'
 
   function handlePrint() {

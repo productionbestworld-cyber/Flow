@@ -700,7 +700,7 @@ export default function Warehouse() {
           // เป่าส่งคลัง = good output จาก production (ext + grd + prt)
           const { ext, grd, prt } = getSoProductionSummary(soId)
           const prtCalc  = prt ? (prt.inputQty - prt.wasteQty) : undefined
-          const blownQty = prtCalc ?? prt?.goodQty ?? ((ext.goodQty ?? 0) + (grd?.goodQty ?? 0)) || plannedQty
+          const blownQty = prtCalc ?? prt?.goodQty ?? (((ext.goodQty ?? 0) + (grd?.goodQty ?? 0)) || plannedQty)
 
           // คลังรับจริง = ยังอยู่ในคลัง
           const warehouseQty = goodStock
