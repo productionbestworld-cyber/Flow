@@ -1,5 +1,7 @@
-import { useState } from 'react'
-import { History, ChevronDown, ChevronRight, Wind, Printer, Cog, Package, CheckCircle2, Clock } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { History, ChevronDown, ChevronRight, Wind, Printer, Cog, Package, CheckCircle2, Clock, List, FileText } from 'lucide-react'
+import { supabase } from '../../lib/supabase'
+import RollReportModal from './RollReportModal'
 import { formatNumber, cn } from '../../lib/utils'
 import type { PlanningJob, ProductionLog, PlanningDept } from '../../types'
 
@@ -26,9 +28,68 @@ function StatusDot({ status }: { status: string }) {
   return <Clock size={13} className="text-slate-500 shrink-0" />
 }
 
+function RollLogTable({ jobId, onShowReport }: { jobId: string, onShowReport: (rolls: any[]) => void }) {
+  const [rolls, setRolls] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function fetchRolls() {
+      const { data } = await supabase
+        .from('production_rolls')
+        .select('*')
+        .eq('job_id', jobId)
+        .order('roll_no', { ascending: true })
+      if (data) setRolls(data)
+      setLoading(false)
+    }
+    fetchRolls()
+  }, [jobId])
+
+  if (loading) return <div className="text-[10px] text-slate-500 animate-pulse py-2 px-4">กำลังดึงข้อมูลม้วน...</div>
+  if (rolls.length === 0) return <div className="text-[10px] text-slate-600 italic py-2 px-4">ไม่มีข้อมูลการชั่งม้วน</div>
+
+  return (
+    <div className="mt-4 border border-slate-700/50 rounded-lg overflow-hidden bg-slate-900/30">
+      <div className="bg-slate-800/50 p-2 px-4 flex justify-between items-center border-b border-slate-700/50">
+         <span className="text-[9px] font-black uppercase text-slate-500 tracking-widest">Roll Details</span>
+         <button 
+           onClick={() => onShowReport(rolls)}
+           className="text-[9px] font-black uppercase text-brand-400 hover:text-brand-300 flex items-center gap-2 transition-colors"
+         >
+           <FileText size={11} /> พิมพ์รายงาน A4
+         </button>
+      </div>
+      <table className="w-full text-[10px]">
+        <thead className="bg-slate-800 text-slate-500">
+          <tr>
+            <th className="p-2 text-left">ม้วน</th>
+            <th className="p-2 text-right">ชั่ง (kg)</th>
+            <th className="p-2 text-right">แกน</th>
+            <th className="p-2 text-right text-brand-400">สุทธิ (kg)</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-800">
+          {rolls.map(r => (
+            <tr key={r.id} className="hover:bg-slate-800 transition-colors">
+              <td className="p-2 font-bold text-slate-300">#{r.roll_no}</td>
+              <td className="p-2 text-right text-slate-500">{(Number(r.weight) + Number(r.core_weight || 0)).toFixed(2)}</td>
+              <td className="p-2 text-right text-slate-500">{r.core_weight || 0}</td>
+              <td className="p-2 text-right font-black text-brand-400">{r.weight}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 export default function ProductionHistory({ dept, jobs, logs }: Props) {
   const [panelOpen, setPanelOpen] = useState(true)
   const [expandedSOs, setExpandedSOs] = useState<Set<string>>(new Set())
+  const [showRollLog, setShowRollLog] = useState<string | null>(null)
+  const [showReport, setShowReport] = useState(false)
+  const [reportRolls, setReportRolls] = useState<any[]>([])
+  const [reportJob, setReportJob] = useState<any>(null)
 
   function toggleSO(soId: string) {
     setExpandedSOs(prev => {
@@ -38,10 +99,8 @@ export default function ProductionHistory({ dept, jobs, logs }: Props) {
     })
   }
 
-  // งานที่เสร็จแล้วของ dept นี้
   const doneJobs = jobs.filter(j => j.dept === dept && (j.status === 'done' || j.status === 'pending_receipt'))
 
-  // จัดกลุ่มตาม SO
   const grouped = doneJobs.reduce<Record<string, PlanningJob[]>>((acc, j) => {
     const key = j.sale_order_id
     if (!acc[key]) acc[key] = []
@@ -59,7 +118,6 @@ export default function ProductionHistory({ dept, jobs, logs }: Props) {
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
-      {/* Panel header */}
       <button
         onClick={() => setPanelOpen(v => !v)}
         className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-slate-800/50 transition-colors"
@@ -79,7 +137,6 @@ export default function ProductionHistory({ dept, jobs, logs }: Props) {
             const so      = soJobs[0]?.sale_order
             const isOpen  = expandedSOs.has(soId)
 
-            // สรุปยอดรวมของ SO นี้ใน dept นี้
             const totalPlanned = soJobs.reduce((s, j) => s + j.planned_qty, 0)
             const soLogs = soJobs.map(j => logs.find(l => l.planning_job_id === j.id))
             const totalGood  = soLogs.reduce((s, l) => s + (l?.good_qty   ?? 0), 0)
@@ -90,31 +147,20 @@ export default function ProductionHistory({ dept, jobs, logs }: Props) {
 
             return (
               <div key={soId}>
-                {/* SO row — คลิกเพื่อขยาย */}
                 <button
                   onClick={() => toggleSO(soId)}
                   className="w-full flex items-center gap-3 px-5 py-3 hover:bg-slate-800/40 transition-colors text-left"
                 >
-                  {isOpen
-                    ? <ChevronDown size={14} className="text-slate-500 shrink-0" />
-                    : <ChevronRight size={14} className="text-slate-500 shrink-0" />
-                  }
-
-                  {/* SO info */}
+                  {isOpen ? <ChevronDown size={14} className="text-slate-500 shrink-0" /> : <ChevronRight size={14} className="text-slate-500 shrink-0" />}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-white text-sm font-bold">{so?.so_no ?? '-'}</span>
                       <DeptBadge dept={dept} />
-                      <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full', allDone ? 'bg-green-500/20 text-green-300' : 'bg-yellow-500/20 text-yellow-300')}>
-                        {allDone ? 'เสร็จแล้ว' : 'รอรับคลัง'}
-                      </span>
                     </div>
                     <p className="text-slate-400 text-xs mt-0.5 truncate">
                       {so?.customer?.name}{so?.product?.part_name ? ` · ${so.product.part_name}` : ''}
                     </p>
                   </div>
-
-                  {/* Summary numbers */}
                   <div className="flex items-center gap-4 shrink-0 text-right">
                     <div>
                       <p className="text-slate-500 text-[10px]">วางแผน</p>
@@ -126,15 +172,9 @@ export default function ProductionHistory({ dept, jobs, logs }: Props) {
                         <p className="text-green-300 text-xs font-bold">{formatNumber(totalGood)} kg</p>
                       </div>
                     )}
-                    {yieldPct !== null && (
-                      <div className={cn('text-xs font-bold px-2 py-0.5 rounded', yieldPct >= 95 ? 'bg-green-500/20 text-green-300' : yieldPct >= 90 ? 'bg-yellow-500/20 text-yellow-300' : 'bg-red-500/20 text-red-300')}>
-                        {yieldPct}%
-                      </div>
-                    )}
                   </div>
                 </button>
 
-                {/* Process detail — accordion */}
                 {isOpen && (
                   <div className="bg-slate-800/30 border-t border-slate-800/60 px-5 py-4 space-y-3">
                     {soJobs.map((job) => {
@@ -149,7 +189,6 @@ export default function ProductionHistory({ dept, jobs, logs }: Props) {
 
                       return (
                         <div key={job.id} className="bg-slate-800 border border-slate-700 rounded-xl p-4">
-                          {/* Job header */}
                           <div className="flex items-center justify-between gap-3 mb-3">
                             <div className="flex items-center gap-2">
                               <StatusDot status={job.status} />
@@ -159,14 +198,7 @@ export default function ProductionHistory({ dept, jobs, logs }: Props) {
                             <span className="text-slate-500 text-[10px]">{formatTs(log?.finished_at ?? job.created_at)}</span>
                           </div>
 
-                          {/* Production chain */}
                           <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
-                            {rawMat != null && (
-                              <div className="flex justify-between col-span-2 border-b border-slate-700 pb-2 mb-1">
-                                <span className="text-slate-400">วัตถุดิบเบิก</span>
-                                <span className="text-slate-300 font-medium">{formatNumber(rawMat)} kg</span>
-                              </div>
-                            )}
                             <div className="flex justify-between">
                               <span className="text-slate-400">วางแผน</span>
                               <span className="text-slate-300">{formatNumber(job.planned_qty)} kg</span>
@@ -177,56 +209,49 @@ export default function ProductionHistory({ dept, jobs, logs }: Props) {
                                 <span className="text-green-300 font-semibold">{formatNumber(goodQty)} kg</span>
                               </div>
                             )}
-                            {badQty > 0 && (
-                              <div className="flex justify-between">
-                                <span className="text-orange-400">⚙ กรอ{badRolls > 0 ? ` ${badRolls} ม้วน` : ''}</span>
-                                <span className="text-orange-300">{formatNumber(badQty)} kg</span>
-                              </div>
-                            )}
-                            {wasteQty > 0 && (
-                              <div className="flex justify-between">
-                                <span className="text-red-400">✗ เศษเสีย</span>
-                                <span className="text-red-300">{formatNumber(wasteQty)} kg</span>
-                              </div>
-                            )}
                           </div>
 
-                          {/* Yield bar */}
-                          {jYield !== null && (
-                            <div className="mt-3">
-                              <div className="flex justify-between text-[10px] mb-1">
-                                <span className="text-slate-500">Yield</span>
-                                <span className={cn('font-bold', jYield >= 95 ? 'text-green-300' : jYield >= 90 ? 'text-yellow-300' : 'text-red-300')}>{jYield}%</span>
-                              </div>
-                              <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                                <div
-                                  className={cn('h-full rounded-full', jYield >= 95 ? 'bg-green-500' : jYield >= 90 ? 'bg-yellow-500' : 'bg-red-500')}
-                                  style={{ width: `${Math.min(jYield, 100)}%` }}
-                                />
-                              </div>
-                            </div>
-                          )}
+                          <div className="mt-4 pt-4 border-t border-white/5">
+                            <button 
+                              onClick={() => setShowRollLog(showRollLog === job.id ? null : job.id)}
+                              className={cn(
+                                "flex items-center gap-2 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border active:scale-95 shadow-md",
+                                showRollLog === job.id
+                                  ? "bg-brand-500 text-white border-brand-400 shadow-brand-500/30"
+                                  : "bg-brand-500/10 text-brand-400 border-brand-500/20 hover:bg-brand-500/20"
+                              )}
+                            >
+                              <List size={12} /> {showRollLog === job.id ? 'ปิดรายละเอียดม้วน' : 'ดูประวัติม้วนรายตัว'}
+                            </button>
+                            {showRollLog === job.id && (
+                              <RollLogTable 
+                                jobId={job.id} 
+                                onShowReport={(rolls) => {
+                                  setReportRolls(rolls);
+                                  setReportJob(job);
+                                  setShowReport(true);
+                                }}
+                              />
+                            )}
+                          </div>
                         </div>
                       )
                     })}
-
-                    {/* SO total summary */}
-                    {soJobs.length > 1 && (
-                      <div className="bg-slate-700/40 rounded-lg px-4 py-3 flex items-center justify-between text-xs border border-slate-700">
-                        <span className="text-slate-400 font-medium">รวมทั้งหมด ({soJobs.length} Lot)</span>
-                        <div className="flex gap-4">
-                          <span className="text-slate-300">วางแผน {formatNumber(totalPlanned)} kg</span>
-                          <span className="text-green-300 font-bold">ดี {formatNumber(totalGood)} kg{totalRolls > 0 ? ` · ${totalRolls} ม้วน` : ''}</span>
-                          {totalWaste > 0 && <span className="text-red-400">เศษ {formatNumber(totalWaste)} kg</span>}
-                        </div>
-                      </div>
-                    )}
                   </div>
                 )}
               </div>
             )
           })}
         </div>
+      )}
+
+      {showReport && (
+        <RollReportModal
+          isOpen={showReport}
+          onClose={() => setShowReport(false)}
+          job={reportJob}
+          rolls={reportRolls}
+        />
       )}
     </div>
   )

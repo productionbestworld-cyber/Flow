@@ -17,6 +17,7 @@ import Customers from './pages/Customers'
 import Products from './pages/Products'
 import Settings from './pages/Settings'
 import ActivityLog from './pages/ActivityLog'
+import WeighingTerminal from './pages/WeighingTerminal'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -50,6 +51,7 @@ export default function App() {
               <Route path="products"   element={<ErrorBoundary><Products /></ErrorBoundary>} />
               <Route path="settings"    element={<ErrorBoundary><Settings /></ErrorBoundary>} />
               <Route path="activity"   element={<ErrorBoundary><ActivityLog /></ErrorBoundary>} />
+              <Route path="weighing"   element={<ErrorBoundary><WeighingTerminal /></ErrorBoundary>} />
             </Route>
           </Routes>
         </BrowserRouter>
