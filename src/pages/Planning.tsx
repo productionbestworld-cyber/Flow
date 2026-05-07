@@ -38,12 +38,23 @@ function JobCells({ job, onEdit }: { job: PlanningJob; onEdit: (job: PlanningJob
       <td className="px-3 py-2.5 max-w-[140px]">
         <span className="text-slate-300 text-xs truncate block">{so?.customer?.name}</span>
       </td>
-      <td className="px-3 py-2.5 max-w-[180px]">
-        <span className="text-slate-300 text-xs truncate block">{so?.product?.part_name}</span>
-        <div className="flex gap-1 mt-0.5 flex-wrap">
-          {so?.grade && <span className="text-[10px] bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded">เกรด {so.grade}</span>}
-          {so?.weight_per_roll && <span className="text-[10px] bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded">{so.weight_per_roll} kg/ม้วน</span>}
-          {so?.core_type && <span className="text-[10px] bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded">แกน {so.core_type === 'pvc' ? 'PVC' : 'กระดาษ'}</span>}
+      <td className="px-3 py-2.5 max-w-[220px]">
+        <div className="flex flex-col gap-1">
+          <span className="text-white text-xs font-bold leading-tight">{so?.product?.part_name}</span>
+          <div className="flex gap-1 flex-wrap">
+             {so?.product?.width && <span className="text-[10px] bg-cyan-500/20 text-cyan-300 px-1.5 py-0.5 rounded font-black">กว้าง {so.product.width}</span>}
+             {so?.product?.thickness && <span className="text-[10px] bg-brand-500/20 text-brand-300 px-1.5 py-0.5 rounded font-black">หนา {so.product.thickness}</span>}
+             {so?.core_type && <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded border border-white/5">แกน {so.core_type} {so.core_size_mil ? `(${so.core_size_mil}")` : ''}</span>}
+             {so?.weight_per_roll && <span className="text-[10px] bg-amber-500/10 text-amber-400 px-1.5 py-0.5 rounded border border-amber-500/20 font-bold">{so.weight_per_roll} kg/ม้วน</span>}
+             {so?.length_per_roll && <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded border border-white/5">{so.length_per_roll} m/ม้วน</span>}
+             {so?.rolls_per_bundle && <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded border border-white/5">{so.rolls_per_bundle} ม้วน/มัด</span>}
+             {so?.pallet_type && <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded border border-white/5">พาเลท: {so.pallet_type}</span>}
+          </div>
+          {so?.remark && (
+            <div className="mt-1 text-[9px] text-brand-400 bg-brand-500/5 px-1.5 py-0.5 rounded border border-brand-500/10 italic">
+              <strong>Note:</strong> {so.remark}
+            </div>
+          )}
         </div>
       </td>
       <td className="px-3 py-2.5 whitespace-nowrap">
@@ -708,8 +719,26 @@ export default function Planning() {
                     <td className="px-5 py-3 max-w-[160px]">
                       <span className="text-slate-300 text-xs truncate block">{o.customer?.name}</span>
                     </td>
-                    <td className="px-5 py-3 max-w-[200px]">
-                      <span className="text-slate-300 text-xs truncate block">{o.product?.part_name}</span>
+                    <td className="px-5 py-3">
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-white text-xs font-bold">{o.product?.part_name}</span>
+                          <span className="text-[10px] text-slate-500 font-mono">[{o.item_code || o.product?.item_code}]</span>
+                        </div>
+                        <div className="flex gap-1 flex-wrap">
+                           {o.product?.width && <span className="text-[10px] bg-sky-400/20 text-sky-300 px-1.5 py-0.5 rounded font-black border border-sky-400/20">กว้าง {o.product.width}</span>}
+                           {o.product?.thickness && <span className="text-[10px] bg-brand-500/20 text-brand-300 px-1.5 py-0.5 rounded font-black border border-brand-500/20">หนา {o.product.thickness}</span>}
+                           {o.grade && <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded border border-white/5">เกรด {o.grade}</span>}
+                           {o.core_type && <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded border border-white/5">แกน {o.core_type} {o.core_size_mil ? `(${o.core_size_mil}")` : ''}</span>}
+                           {o.weight_per_roll && <span className="text-[10px] bg-amber-500/10 text-amber-400 px-1.5 py-0.5 rounded border border-amber-500/20 font-bold">{o.weight_per_roll} kg/ม้วน</span>}
+                           {o.pallet_type && <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded border border-white/5">พาเลท: {o.pallet_type}</span>}
+                        </div>
+                        {o.remark && (
+                          <div className="mt-1 text-[9px] text-yellow-300/80 bg-yellow-500/5 px-2 py-1 rounded border border-yellow-500/10 italic">
+                            <strong>หมายเหตุ:</strong> {o.remark}
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="px-5 py-3 whitespace-nowrap">
                       <span className="text-white text-sm font-semibold">{formatNumber(Math.max(0, o.qty - (o.stock_qty ?? 0)))}</span>

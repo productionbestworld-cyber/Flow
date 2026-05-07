@@ -1,6 +1,9 @@
-import { useState } from 'react'
-import { Play, CheckCircle, Save, Cog, Edit2 } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Play, CheckCircle, Save, Cog, Edit2, Scale, List, Clock, FileText } from 'lucide-react'
 import { useUpsertProductionLog, useFinishProduction, useEditProductionLog } from '../../hooks/useProduction'
+import { supabase } from '../../lib/supabase'
+import WeighingModal from './WeighingModal'
+import RollReportModal from './RollReportModal'
 import { formatNumber, cn } from '../../lib/utils'
 import type { PlanningJob, ProductionLog, PlanningDept } from '../../types'
 
@@ -8,6 +11,61 @@ interface Props {
   job: PlanningJob
   log?: ProductionLog
   dept: PlanningDept
+}
+
+function RollLogTable({ jobId }: { jobId: string }) {
+  const [rolls, setRolls] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function fetchRolls() {
+      const { data } = await supabase
+        .from('production_rolls')
+        .select('*')
+        .eq('job_id', jobId)
+        .order('roll_no', { ascending: true })
+      if (data) setRolls(data)
+      setLoading(false)
+    }
+    fetchRolls()
+  }, [jobId])
+
+  if (loading) return <div className="text-[10px] text-slate-500 animate-pulse py-2">กำลังดึงข้อมูลม้วน...</div>
+  if (rolls.length === 0) return <div className="text-[10px] text-slate-600 italic py-2">ไม่มีข้อมูลการชั่งม้วน</div>
+
+  return (
+    <div className="mt-4 border border-slate-800 rounded-lg overflow-hidden bg-slate-900/50">
+      <div className="bg-slate-800 p-2 px-4 flex justify-between items-center">
+         <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Roll History</span>
+         <button 
+           onClick={() => (window as any).showReport(rolls)}
+           className="text-[10px] font-black uppercase text-brand-400 hover:text-brand-300 flex items-center gap-2"
+         >
+           <FileText size={12} /> ดูแบบฟอร์ม A4
+         </button>
+      </div>
+      <table className="w-full text-[10px]">
+        <thead className="bg-slate-800 text-slate-500 uppercase tracking-widest text-[9px]">
+          <tr>
+            <th className="p-2 text-left">ม้วน</th>
+            <th className="p-2 text-right">ชั่งดิบ</th>
+            <th className="p-2 text-right">แกน</th>
+            <th className="p-2 text-right text-brand-400 font-black">สุทธิ (kg)</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-800">
+          {rolls.map(r => (
+            <tr key={r.id} className="hover:bg-slate-800 transition-colors">
+              <td className="p-2 font-bold text-slate-300">#{r.roll_no}</td>
+              <td className="p-2 text-right text-slate-500">{(Number(r.weight) + Number(r.core_weight || 0)).toFixed(2)}</td>
+              <td className="p-2 text-right text-slate-500">{r.core_weight || 0}</td>
+              <td className="p-2 text-right font-black text-brand-400 text-sm">{r.weight}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
 }
 
 export default function ProductionJobCard({ job, log, dept }: Props) {
@@ -22,6 +80,29 @@ export default function ProductionJobCard({ job, log, dept }: Props) {
   const [wasteQty, setWasteQty]    = useState(log?.waste_qty?.toString() ?? '')
   const [saving, setSaving]        = useState(false)
   const [isEditing, setIsEditing]  = useState(false)
+  const [showWeighModal, setShowWeighModal] = useState(false)
+  const [showRollLog, setShowRollLog] = useState(false)
+  const [showReport, setShowReport] = useState(false)
+  const [reportRolls, setReportRolls] = useState<any[]>([])
+
+  // Global hook for child component to trigger report
+  useEffect(() => {
+    (window as any).showReport = (rolls: any[]) => {
+      setReportRolls(rolls);
+      setShowReport(true);
+    };
+  }, []);
+
+  // Sync state with props when data changes
+  useEffect(() => {
+    if (log) {
+      setGoodRolls(log.good_rolls?.toString() ?? '')
+      setGoodQty(log.good_qty?.toString() ?? '')
+      setBadRolls(log.bad_rolls?.toString() ?? '')
+      setBadQty(log.bad_qty?.toString() ?? '')
+      setWasteQty(log.waste_qty?.toString() ?? '')
+    }
+  }, [log])
 
   const so = job.sale_order
   const isFinished = !!log?.finished_at
@@ -73,7 +154,6 @@ export default function ProductionJobCard({ job, log, dept }: Props) {
   const isPrintJob = job.route_after === 'to_printing'
 
   async function handleFinish() {
-    // ใช้ค่าจาก input ปัจจุบัน (ไม่ต้องบันทึกก่อน)
     const finalGoodRolls = goodRolls ? parseFloat(goodRolls) : (log?.good_rolls ?? undefined)
     const finalGoodQty   = goodQty   ? parseFloat(goodQty)   : (log?.good_qty   ?? undefined)
     const finalBadRolls  = badRolls  ? parseFloat(badRolls)  : (log?.bad_rolls  ?? undefined)
@@ -96,7 +176,6 @@ export default function ProductionJobCard({ job, log, dept }: Props) {
     }
     if (!confirm(lines.join('\n'))) return
 
-    // บันทึก log ก่อนถ้ายังไม่มี (หรือ update)
     let logId = log?.id
     try {
       const saved = await upsert.mutateAsync({
@@ -157,207 +236,104 @@ export default function ProductionJobCard({ job, log, dept }: Props) {
           {isEditing && (
             <span className="text-yellow-400 text-xs">โหมดแก้ไข</span>
           )}
-          {!isFinished && log?.bad_rolls && log.bad_rolls > 0 && (
-            <span className="flex items-center gap-1 bg-orange-500/15 border border-orange-500/30 text-orange-300 text-[10px] px-2 py-0.5 rounded-full">
-              <Cog size={9} /> ม้วนเสีย {log.bad_rolls} ม้วน → กรอ
-            </span>
-          )}
         </div>
       </div>
 
-      {/* Route summary — แสดงเฉพาะ extrusion */}
-      {dept === 'extrusion' && (
-        <div className="flex gap-2 flex-wrap">
-          <span className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border ${
-            isPrintJob
-              ? 'bg-purple-500/10 border-purple-500/30 text-purple-300'
-              : 'bg-yellow-500/10 border-yellow-500/30 text-yellow-300'
-          }`}>
-            ม้วนดี → {isPrintJob ? 'Printing' : 'คลัง'}
-          </span>
-          <span className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border bg-orange-500/10 border-orange-500/30 text-orange-300">
-            <Cog size={9} /> ม้วนเสีย → Grinding
-          </span>
-        </div>
-      )}
-
-      {/* Material summary */}
-      {(() => {
-        const inputQty  = dept === 'grinding' ? job.planned_qty : job.raw_material_qty
-        const inputLabel = dept === 'grinding' ? 'ม้วนเสียรับมา (input)' : 'วัตถุดิบเบิก (วางแผน)'
-        const outputLabel = dept === 'grinding' ? 'กรอได้ (output)' : 'ผลิตได้ (ม้วนดี)'
-        if (!inputQty && !log?.good_qty) return null
-        return (
-          <div className="bg-slate-800/60 rounded-lg px-3 py-2 space-y-1">
-            {inputQty && (
-              <div className="flex justify-between text-xs">
-                <span className="text-slate-400">{inputLabel}</span>
-                <span className="text-white">{formatNumber(inputQty)} kg</span>
-              </div>
-            )}
-            {log?.good_qty && (
-              <div className="flex justify-between text-xs">
-                <span className="text-green-400">{outputLabel}</span>
-                <span className="text-green-300">{formatNumber(log.good_qty)} kg</span>
-              </div>
-            )}
-            {log?.waste_qty && log.waste_qty > 0 && (
-              <div className="flex justify-between text-xs">
-                <span className="text-orange-400">เศษสแคป</span>
-                <span className="text-orange-300">{formatNumber(log.waste_qty)} kg</span>
-              </div>
-            )}
-            {inputQty && log?.good_qty && (
-              <>
-                <div className="flex justify-between text-xs">
-                  <span className="text-red-400">สูญเสียรวม</span>
-                  <span className="text-red-300">{formatNumber(inputQty - log.good_qty)} kg</span>
-                </div>
-                <div className="flex justify-between text-xs border-t border-slate-700 pt-1">
-                  <span className="text-slate-400">Yield</span>
-                  <span className={`font-medium ${Math.round(log.good_qty / inputQty * 100) >= 90 ? 'text-green-400' : 'text-yellow-400'}`}>
-                    {Math.round(log.good_qty / inputQty * 100)}%
-                  </span>
-                </div>
-              </>
-            )}
-          </div>
-        )
-      })()}
-
-      {/* Progress */}
-      <div>
+      {/* Progress Section */}
+      <div className="space-y-3">
         <div className="flex justify-between text-xs mb-1">
-          <span className="text-slate-400">ความคืบหน้า</span>
-          <span className="text-white">{pct}% ({goodQty || 0} / {formatNumber(job.planned_qty)} kg)</span>
+          <div className="flex items-center gap-2">
+            <span className="text-slate-400 font-bold uppercase text-[9px] tracking-widest">ความคืบหน้า</span>
+            <button 
+              onClick={() => {
+                console.log('Toggling roll log for:', job.id);
+                setShowRollLog(!showRollLog);
+              }}
+              className={cn(
+                "px-3 py-1 rounded-full text-[10px] font-black uppercase transition-all flex items-center gap-2 border active:scale-95 shadow-lg",
+                showRollLog 
+                  ? "bg-brand-500 text-white border-brand-400 shadow-brand-500/40" 
+                  : "bg-brand-500/10 text-brand-400 border-brand-500/20 hover:bg-brand-500/20"
+              )}
+            >
+              <List size={12} /> {showRollLog ? 'ปิดรายการ' : `ชั่งแล้ว ${log?.good_rolls || 0} ม้วน`}
+            </button>
+
+            {/* NEW: Direct Print A4 Button */}
+            <button 
+              onClick={async () => {
+                const { data } = await supabase.from('production_rolls').select('*').eq('job_id', job.id).order('roll_no', { ascending: true });
+                if (data) {
+                  setReportRolls(data);
+                  setShowReport(true);
+                }
+              }}
+              className="bg-slate-800 hover:bg-slate-700 text-brand-400 px-3 py-1 rounded-full text-[10px] font-black uppercase transition-all flex items-center gap-2 border border-slate-700 active:scale-95"
+            >
+              <FileText size={12} /> รายงาน A4
+            </button>
+          </div>
+          <span className="text-white font-black">{pct}% <small className="opacity-40 font-normal">({formatNumber(parseFloat(goodQty || '0'))} / {formatNumber(job.planned_qty)} kg)</small></span>
         </div>
-        <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-          <div className="h-full bg-brand-500 rounded-full transition-all" style={{ width: `${pct}%` }} />
+        
+        <div className="h-2 bg-slate-800 rounded-full overflow-hidden p-0.5 border border-white/5">
+          <div className="h-full bg-brand-500 rounded-full transition-all duration-1000 shadow-[0_0_15px_rgba(var(--brand-500),0.5)]" style={{ width: `${pct}%` }} />
         </div>
+
+        {/* Real-time Roll Log */}
+        {showRollLog && <RollLogTable jobId={job.id} />}
       </div>
 
       {/* Inputs */}
       {(!isFinished || isEditing) && (
-        <div className="grid gap-2">
-          {dept === 'grinding' ? (
+        <div className="grid gap-2 border-t border-slate-800 pt-3">
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="block text-xs text-slate-500 mb-1">ม้วนที่กรอได้</label>
-                <input
-                  type="number"
-                  value={goodRolls}
-                  onChange={e => setGoodRolls(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-sm text-white outline-none focus:border-brand-500"
-                />
+                <label className="block text-[10px] font-black uppercase text-slate-500 mb-1 tracking-widest text-center">ม้วนดี (Rolls)</label>
+                <input type="number" value={goodRolls} onChange={e => setGoodRolls(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-sm text-white outline-none focus:border-brand-500 text-center font-black" />
               </div>
               <div>
-                <label className="block text-xs text-slate-500 mb-1">น้ำหนักที่กรอได้ (kg)</label>
-                <input
-                  type="number"
-                  value={goodQty}
-                  onChange={e => setGoodQty(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-sm text-white outline-none focus:border-brand-500"
-                />
-              </div>
-              <div className="col-span-2">
-                <label className="block text-xs text-slate-500 mb-1">เศษสแคป (kg)</label>
-                <input
-                  type="number"
-                  value={wasteQty}
-                  onChange={e => setWasteQty(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-sm text-white outline-none focus:border-brand-500"
-                />
+                <label className="block text-[10px] font-black uppercase text-slate-500 mb-1 tracking-widest text-center">น้ำหนักดี (kg)</label>
+                <input type="number" value={goodQty} onChange={e => setGoodQty(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-sm text-white outline-none focus:border-brand-500 text-center font-black" />
               </div>
             </div>
-          ) : (
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="block text-xs text-slate-500 mb-1">ม้วนดี</label>
-                <input
-                  type="number"
-                  value={goodRolls}
-                  onChange={e => setGoodRolls(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-sm text-white outline-none focus:border-brand-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-slate-500 mb-1">ม้วนดี (kg)</label>
-                <input
-                  type="number"
-                  value={goodQty}
-                  onChange={e => setGoodQty(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-sm text-white outline-none focus:border-brand-500"
-                />
-              </div>
-              {dept !== 'printing' && (
-                <>
-                  <div>
-                    <label className="block text-xs text-slate-500 mb-1">ม้วนกรอ</label>
-                    <input
-                      type="number"
-                      value={badRolls}
-                      onChange={e => setBadRolls(e.target.value)}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-sm text-white outline-none focus:border-brand-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-slate-500 mb-1">ม้วนกรอ (kg)</label>
-                    <input
-                      type="number"
-                      value={badQty}
-                      onChange={e => setBadQty(e.target.value)}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-sm text-white outline-none focus:border-brand-500"
-                    />
-                  </div>
-                </>
-              )}
-              <div className="col-span-2">
-                <label className="block text-xs text-slate-500 mb-1">เศษเสีย (kg)</label>
-                <input
-                  type="number"
-                  value={wasteQty}
-                  onChange={e => setWasteQty(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-sm text-white outline-none focus:border-brand-500"
-                />
-              </div>
-            </div>
-          )}
         </div>
       )}
 
       {/* Actions */}
       {!isFinished && (
         <div className="flex flex-col gap-2 pt-1">
+          <div className="flex gap-2">
+             <button onClick={handleSave} disabled={saving} className="flex-1 flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-white text-xs px-3 py-2 rounded-lg transition-colors font-bold"><Save size={14} /> บันทึกยอด</button>
+             <button onClick={handleFinish} className="flex-1 flex items-center justify-center gap-1.5 bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-2 rounded-lg transition-colors font-bold"><Play size={14} /> เสร็จสิ้น</button>
+          </div>
+          
           <button
-            onClick={handleSave}
-            disabled={saving}
-            className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-white text-xs px-3 py-1.5 rounded-lg transition-colors"
+            onClick={() => setShowWeighModal(true)}
+            className="flex items-center justify-center gap-3 bg-brand-600 hover:bg-brand-700 text-white text-sm font-black p-4 rounded-xl transition-all shadow-lg shadow-brand-500/20 active:scale-95 border-b-4 border-brand-800"
           >
-            <Save size={13} /> {saving ? 'กำลังบันทึก...' : 'บันทึก'}
+            <Scale size={20} /> เริ่มชั่งน้ำหนักม้วน
           </button>
-          <button
-            onClick={handleFinish}
-            className="flex items-center gap-1.5 bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1.5 rounded-lg transition-colors ml-auto"
-          >
-            <Play size={13} /> เสร็จสิ้น
-          </button>
+
+          <WeighingModal 
+            isOpen={showWeighModal} 
+            onClose={() => { setShowWeighModal(false); window.location.reload(); }} 
+            job={job}
+          />
+
+          <RollReportModal
+            isOpen={showReport}
+            onClose={() => setShowReport(false)}
+            job={job}
+            rolls={reportRolls}
+          />
         </div>
       )}
+      
       {isEditing && (
         <div className="flex gap-2 pt-1">
-          <button
-            onClick={() => { setIsEditing(false); setGoodRolls(log?.good_rolls?.toString() ?? ''); setGoodQty(log?.good_qty?.toString() ?? ''); setBadRolls(log?.bad_rolls?.toString() ?? ''); setBadQty(log?.bad_qty?.toString() ?? ''); setWasteQty(log?.waste_qty?.toString() ?? '') }}
-            className="flex-1 bg-slate-800 hover:bg-slate-700 text-white text-xs py-1.5 rounded-lg transition-colors"
-          >
-            ยกเลิก
-          </button>
-          <button
-            onClick={handleSaveEdit}
-            disabled={editLog.isPending}
-            className="flex-1 flex items-center justify-center gap-1.5 bg-yellow-600 hover:bg-yellow-700 disabled:opacity-50 text-white text-xs py-1.5 rounded-lg transition-colors"
-          >
-            <Save size={13} /> {editLog.isPending ? 'กำลังบันทึก...' : 'บันทึกแก้ไข'}
-          </button>
+          <button onClick={() => setIsEditing(false)} className="flex-1 bg-slate-800 hover:bg-slate-700 text-white text-xs py-2 rounded-lg transition-colors font-bold">ยกเลิก</button>
+          <button onClick={handleSaveEdit} disabled={editLog.isPending} className="flex-1 flex items-center justify-center gap-1.5 bg-yellow-600 hover:bg-yellow-700 text-white text-xs py-2 rounded-lg transition-colors font-bold"><Save size={14} /> บันทึกแก้ไข</button>
         </div>
       )}
     </div>

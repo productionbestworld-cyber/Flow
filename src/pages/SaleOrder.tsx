@@ -851,10 +851,19 @@ export default function SaleOrder() {
                 </div>
                 <div>
                   <Label>Item Code</Label>
-                  <Input
-                    value={form.item_code}
-                    onChange={e => set('item_code', e.target.value)}
-                    placeholder="Item Code"
+                  <SearchableSelect
+                    value={form.product_id}
+                    placeholder="-- ค้นหา Item Code --"
+                    options={products?.map(p => ({ id: p.id, label: p.item_code || '—' })) ?? []}
+                    onChange={id => {
+                      const p = products?.find(x => x.id === id)
+                      set('product_id', id)
+                      if (p?.item_code) set('item_code', p.item_code)
+                      if (p?.width != null) set('width', p.width.toString())
+                      else set('width', '')
+                      if (p?.thickness != null) set('thickness', p.thickness.toString())
+                      else set('thickness', '')
+                    }}
                   />
                 </div>
                 <div>
