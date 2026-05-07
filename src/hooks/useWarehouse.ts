@@ -70,11 +70,13 @@ export function useAddManualStock() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async ({
-      lot_no, product_id, qty, unit, received_by,
-    }: { lot_no: string; product_id: string; qty: number; unit: string; received_by?: string }) => {
+      lot_no, product_id, qty, unit, rolls, location, received_by,
+    }: { lot_no: string; product_id: string; qty: number; unit: string; rolls?: number; location?: string; received_by?: string }) => {
+      // เก็บจำนวนม้วนไว้ใน location field ด้วย format "[Xม้วน] ที่เก็บ"
+      const loc = [rolls ? `${rolls}ม้วน` : '', location ?? ''].filter(Boolean).join(' | ') || undefined
       const { data, error } = await supabase
         .from('warehouse_stock')
-        .insert({ lot_no, product_id, qty, unit, received_by, condition: 'good', planning_job_id: null })
+        .insert({ lot_no, product_id, qty, unit, received_by, location: loc, condition: 'good', planning_job_id: null })
         .select()
         .single()
       if (error) throw error

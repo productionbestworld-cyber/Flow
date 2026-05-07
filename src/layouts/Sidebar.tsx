@@ -1,20 +1,22 @@
-import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, ShoppingCart, ClipboardList, Wind,
   Printer, Warehouse, TrendingUp, Receipt,
   Settings, ChevronLeft, ChevronRight, LogOut,
-  Cog, Activity,
+  Cog, Activity, Package, PackagePlus, ArrowLeftRight, Clock, List,
 } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { useAuth } from '../lib/AuthContext'
 import { useUiStore } from '../store/uiStore'
 import type { UserRole } from '../types'
 
+interface SubItem { to: string; label: string; icon: React.ReactNode }
 interface NavItem {
   to: string
   label: string
   icon: React.ReactNode
   roles: UserRole[]
+  subItems?: SubItem[]
 }
 
 const navItems: NavItem[] = [
@@ -24,7 +26,16 @@ const navItems: NavItem[] = [
   { to: '/extrusion',  label: 'Blow',        icon: <Wind size={18} />,           roles: ['admin','operator'] },
   { to: '/printing',   label: 'Printing',    icon: <Printer size={18} />,        roles: ['admin','operator'] },
   { to: '/grinding',   label: 'Grinding',    icon: <Cog size={18} />,            roles: ['admin','operator'] },
-  { to: '/warehouse',  label: 'คลังสินค้า',  icon: <Warehouse size={18} />,      roles: ['admin','warehouse'] },
+  {
+    to: '/warehouse', label: 'คลังสินค้า', icon: <Warehouse size={18} />, roles: ['admin','warehouse'],
+    subItems: [
+      { to: '/warehouse?tab=pending',    label: 'รอรับ & ใบเบิก',    icon: <Clock size={13} /> },
+      { to: '/warehouse?tab=lots',       label: 'Lot ทั้งหมด',        icon: <List size={13} /> },
+      { to: '/warehouse?tab=production', label: 'สต็อกสายผลิต',      icon: <Package size={13} /> },
+      { to: '/warehouse?tab=old',        label: 'สต็อกคลังเก่า',     icon: <PackagePlus size={13} /> },
+      { to: '/warehouse?tab=flow',       label: 'ยอดรับ-ส่ง',        icon: <ArrowLeftRight size={13} /> },
+    ],
+  },
   { to: '/sales',      label: 'Sales',       icon: <TrendingUp size={18} />,     roles: ['admin','sales'] },
   { to: '/billing',    label: 'Billing',     icon: <Receipt size={18} />,        roles: ['admin','sales'] },
   { to: '/activity',   label: 'Activity Log', icon: <Activity size={18} />,       roles: ['admin','planner','warehouse','sales','operator'] },
@@ -47,6 +58,7 @@ const roleLabels: Record<UserRole, string> = {
 export default function Sidebar() {
   const { user, signOut } = useAuth()
   const { sidebarCollapsed, toggleSidebar } = useUiStore()
+  const location = useLocation()
 
   const visibleItems = navItems.filter(
     (item) => user && item.roles.includes(user.role)
@@ -74,22 +86,53 @@ export default function Sidebar() {
 
       {/* Nav */}
       <nav className="flex-1 py-3 overflow-y-auto scrollbar-thin">
-        {visibleItems.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.to === '/'}
-            className={({ isActive }) => cn(
-              'flex items-center gap-3 mx-2 px-3 py-2 rounded-lg text-sm transition-colors',
-              isActive
-                ? 'bg-brand-600 text-white'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800'
-            )}
-          >
-            <span className="shrink-0">{item.icon}</span>
-            {!sidebarCollapsed && <span>{item.label}</span>}
-          </NavLink>
-        ))}
+        {visibleItems.map((item) => {
+          const isParentActive = location.pathname === item.to || location.pathname.startsWith(item.to + '/')
+          return (
+            <div key={item.to}>
+              <NavLink
+                to={item.to}
+                end={item.to === '/'}
+                className={({ isActive }) => cn(
+                  'flex items-center gap-3 mx-2 px-3 py-2 rounded-lg text-sm transition-colors',
+                  (isActive || isParentActive)
+                    ? 'bg-brand-600 text-white'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                )}
+              >
+                <span className="shrink-0">{item.icon}</span>
+                {!sidebarCollapsed && <span>{item.label}</span>}
+              </NavLink>
+
+              {/* Sub-items — แสดงเมื่ออยู่ใน route นี้และ sidebar ไม่ collapse */}
+              {!sidebarCollapsed && item.subItems && isParentActive && (
+                <div className="ml-4 mr-2 mt-0.5 mb-1 pl-3 border-l border-slate-700 space-y-0.5">
+                  {item.subItems.map(sub => {
+                    const subUrl = new URL(sub.to, 'http://x')
+                    const subTab = subUrl.searchParams.get('tab')
+                    const currentTab = new URLSearchParams(location.search).get('tab')
+                    const isSubActive = subTab === currentTab || (!currentTab && !subTab)
+                    return (
+                      <NavLink
+                        key={sub.to}
+                        to={sub.to}
+                        className={cn(
+                          'flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs transition-colors',
+                          isSubActive
+                            ? 'bg-brand-500/20 text-brand-300'
+                            : 'text-slate-500 hover:text-white hover:bg-slate-800'
+                        )}
+                      >
+                        <span className="shrink-0">{sub.icon}</span>
+                        <span>{sub.label}</span>
+                      </NavLink>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )
+        })}
       </nav>
 
       {/* User */}

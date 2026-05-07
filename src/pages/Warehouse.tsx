@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { X, PackagePlus, CheckCircle, ClipboardList, Truck, Wind, Printer, Download, Upload, FileText } from 'lucide-react'
 import { downloadCSV, downloadTemplate, parseCSV, printDocument } from '../lib/csvUtils'
 import { useWarehouseStock, useReceiveToStock, useAddManualStock } from '../hooks/useWarehouse'
@@ -12,6 +13,8 @@ import { useProducts } from '../hooks/useProducts'
 import type { PlanningJob, Requisition } from '../types'
 
 export default function Warehouse() {
+  const [searchParams] = useSearchParams()
+  const activeTab = searchParams.get('tab') ?? 'pending'   // pending | production | old | flow
   const { user } = useAuth()
   const { data: stock, isLoading: stockLoading } = useWarehouseStock()
   const { data: jobs } = usePlanningJobs()
@@ -31,12 +34,12 @@ export default function Warehouse() {
   const [mProductId, setMProductId]   = useState('')
   const [mLotNo, setMLotNo]           = useState('')
   const [mQty, setMQty]               = useState('')
+  const [mRolls, setMRolls]           = useState('')
   const [mUnit, setMUnit]             = useState('kg')
   const [mLocation, setMLocation]     = useState('')
-  const [mRemark, setMRemark]         = useState('')
 
   function openManualModal() {
-    setMProductId(''); setMLotNo(''); setMQty(''); setMUnit('kg'); setMLocation(''); setMRemark('')
+    setMProductId(''); setMLotNo(''); setMQty(''); setMRolls(''); setMUnit('kg'); setMLocation('')
     setShowManualModal(true)
   }
 
@@ -48,6 +51,8 @@ export default function Warehouse() {
       product_id: mProductId,
       qty: parseFloat(mQty),
       unit: mUnit,
+      rolls: mRolls ? parseInt(mRolls) : undefined,
+      location: mLocation || undefined,
       received_by: user?.id,
     })
     setShowManualModal(false)
@@ -348,6 +353,9 @@ export default function Warehouse() {
           </div>
         )
       })()}
+
+      {/* ══ TAB: pending — รอรับ & ใบเบิก ══════════════════════════════ */}
+      {activeTab === 'pending' && <>
 
       {/* Requisitions รออนุมัติจากคลัง */}
       {pendingReqs.length > 0 && (
@@ -699,6 +707,118 @@ export default function Warehouse() {
         )
       })()}
 
+      </> /* end pending tab */}
+
+      {/* ══ TAB: lots — Lot ทั้งหมด ══════════════════════════════════ */}
+      {activeTab === 'lots' && (() => {
+        const allLots = stock ?? []
+        const totalKg = allLots.filter(s => s.condition === 'good').reduce((s,i) => s+i.qty, 0)
+        const totalRolls = allLots.reduce((sum, s) => {
+          const lp = (s.location ?? '').split(' | ')
+          const rp = lp.find(p => /^\d+ม้วน$/.test(p))
+          const logRolls = logs?.find(l => l.planning_job_id === s.planning_job_id)?.good_rolls ?? 0
+          return sum + (rp ? parseInt(rp) : logRolls)
+        }, 0)
+
+        return (
+          <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-white font-medium text-sm">Lot ทั้งหมดในระบบ</span>
+                <span className="text-xs bg-slate-700 text-slate-300 px-2 py-0.5 rounded-full">{allLots.length} Lot</span>
+              </div>
+              <div className="flex items-center gap-4 text-xs text-slate-400">
+                <span>ม้วนรวม <span className="text-yellow-300 font-semibold ml-1">{totalRolls > 0 ? totalRolls.toLocaleString() : '—'}</span></span>
+                <span>KG รวม <span className="text-green-300 font-semibold ml-1">{formatNumber(totalKg)}</span></span>
+              </div>
+            </div>
+            {stockLoading ? (
+              <div className="p-4"><TableSkeleton rows={5} /></div>
+            ) : allLots.length === 0 ? (
+              <div className="py-12 text-center text-slate-500 text-sm">ยังไม่มี Lot ในระบบ</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-800 bg-slate-800/40 text-xs text-slate-400 font-medium">
+                      <th className="text-left px-4 py-2.5">Lot No.</th>
+                      <th className="text-left px-4 py-2.5">สินค้า</th>
+                      <th className="text-left px-4 py-2.5">Size</th>
+                      <th className="text-left px-4 py-2.5">SO No.</th>
+                      <th className="text-right px-4 py-2.5 text-yellow-400">ม้วน</th>
+                      <th className="text-right px-4 py-2.5 text-green-400">KG</th>
+                      <th className="text-left px-4 py-2.5">ตำแหน่ง</th>
+                      <th className="text-left px-4 py-2.5">ประเภท</th>
+                      <th className="text-left px-4 py-2.5">สภาพ</th>
+                      <th className="text-left px-4 py-2.5">วันที่รับ</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800">
+                    {allLots.map(s => {
+                      const so   = s.planning_job?.sale_order
+                      const prod = so?.product ?? s.product
+                      const size = prod?.width && prod?.thickness ? `${prod.width}×${prod.thickness}` : '—'
+                      const isOld = !s.planning_job_id
+
+                      // rolls: old stock → parse from location, production → from log
+                      const locParts  = (s.location ?? '').split(' | ')
+                      const rollsPart = locParts.find(p => /^\d+ม้วน$/.test(p))
+                      const locPart   = locParts.filter(p => !/^\d+ม้วน$/.test(p)).join(' | ')
+                      const oldRolls  = rollsPart ? parseInt(rollsPart) : null
+                      const logRolls  = logs?.find(l => l.planning_job_id === s.planning_job_id)?.good_rolls ?? null
+                      const rolls     = isOld ? oldRolls : logRolls
+
+                      return (
+                        <tr key={s.id} className="hover:bg-slate-800/30 transition-colors">
+                          <td className="px-4 py-3">
+                            <span className={`font-mono font-bold text-sm ${isOld ? 'text-amber-300' : 'text-brand-300'}`}>
+                              {s.lot_no}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-slate-200 text-sm max-w-[180px] truncate">
+                            {prod?.part_name ?? '—'}
+                          </td>
+                          <td className="px-4 py-3 text-slate-400 text-xs whitespace-nowrap">{size}</td>
+                          <td className="px-4 py-3 text-slate-400 text-sm">{so?.so_no ?? '—'}</td>
+                          <td className="px-4 py-3 text-right whitespace-nowrap">
+                            {rolls
+                              ? <span className="text-yellow-300 font-semibold">{rolls.toLocaleString()} <span className="text-yellow-500/60 text-xs font-normal">ม้วน</span></span>
+                              : <span className="text-slate-600">—</span>}
+                          </td>
+                          <td className="px-4 py-3 text-right whitespace-nowrap">
+                            <span className="text-green-300 font-semibold">{formatNumber(s.qty)}</span>
+                            <span className="text-green-500/60 text-xs ml-1">kg</span>
+                          </td>
+                          <td className="px-4 py-3 text-slate-500 text-xs">{locPart || '—'}</td>
+                          <td className="px-4 py-3">
+                            {isOld
+                              ? <span className="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full">คลังเก่า</span>
+                              : <span className="text-xs bg-brand-500/20 text-brand-300 px-2 py-0.5 rounded-full">สายผลิต</span>}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`text-xs px-2 py-0.5 rounded-full ${
+                              s.condition === 'good'     ? 'bg-green-500/20 text-green-300' :
+                              s.condition === 'hold'     ? 'bg-yellow-500/20 text-yellow-300' :
+                                                           'bg-red-500/20 text-red-300'
+                            }`}>
+                              {s.condition === 'good' ? 'ดี' : s.condition === 'hold' ? 'Hold' : 'Reject'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-slate-500 text-xs whitespace-nowrap">{formatDate(s.received_at)}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )
+      })()}
+
+      {/* ══ TAB: flow — ยอดรับ-ส่ง ══════════════════════════════════ */}
+      {activeTab === 'flow' && <>
+
       {/* ── ตารางยอดรับ-ส่ง (Full Flow) ──────────────────────────────── */}
       {(() => {
         type RecRow = {
@@ -838,18 +958,15 @@ export default function Warehouse() {
         )
       })()}
 
+      </> /* end flow tab */}
+
+      {/* ══ TAB: production — สต็อกสายผลิต ══════════════════════════════ */}
+      {activeTab === 'production' && <>
+
       {/* ── สต็อกจากสายผลิต ─────────────────────────────────────────────── */}
       {(() => {
         const prodStock = goodStock.filter(s => !!s.planning_job_id)
-        type Group = { soNo: string; productName: string; totalQty: number; unit: string; lots: typeof prodStock }
-        const groups: Group[] = []
-        prodStock.forEach(s => {
-          const so = s.planning_job?.sale_order
-          const key = so?.so_no ?? `_${s.id}`
-          const existing = groups.find(g => g.soNo === key)
-          if (existing) { existing.lots.push(s); existing.totalQty += s.qty }
-          else groups.push({ soNo: key, productName: so?.product?.part_name ?? s.product?.part_name ?? '-', unit: s.unit, totalQty: s.qty, lots: [s] })
-        })
+        const totalProdQty = prodStock.reduce((s,i) => s + i.qty, 0)
         return (
           <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
             <div className="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between bg-slate-800/30">
@@ -858,7 +975,7 @@ export default function Warehouse() {
                 <span className="text-white font-medium text-sm">สต็อกจากสายผลิต</span>
               </div>
               <div className="flex items-center gap-3">
-                <span className="text-green-300 text-sm font-semibold">{formatNumber(prodStock.reduce((s,i)=>s+i.qty,0))} kg</span>
+                <span className="text-green-300 text-sm font-semibold">{formatNumber(totalProdQty)} kg</span>
                 <span className="text-slate-500 text-xs">{prodStock.length} Lot</span>
               </div>
             </div>
@@ -867,40 +984,72 @@ export default function Warehouse() {
             ) : prodStock.length === 0 ? (
               <div className="py-8 text-center text-slate-500 text-sm">ยังไม่มีสต็อกจากสายผลิต</div>
             ) : (
-              <div className="divide-y divide-slate-800">
-                {groups.map(g => (
-                  <div key={g.soNo} className="px-5 py-3">
-                    <div className="flex items-center justify-between mb-1.5">
-                      <div>
-                        {!g.soNo.startsWith('_') && <span className="text-white text-sm font-bold mr-2">{g.soNo}</span>}
-                        <span className="text-slate-300 text-sm">{g.productName}</span>
-                      </div>
-                      <div className="text-right">
-                        <span className="text-white font-bold text-sm">{formatNumber(g.totalQty)} {g.unit}</span>
-                        {g.lots.length > 1 && <span className="text-slate-500 text-xs ml-2">{g.lots.length} Lot</span>}
-                      </div>
-                    </div>
-                    <div className="space-y-0.5 pl-3 border-l-2 border-green-800">
-                      {g.lots.map(s => (
-                        <div key={s.id} className="flex items-center justify-between text-xs">
-                          <div className="flex items-center gap-3">
-                            <span className="text-slate-500 font-mono">{s.lot_no}</span>
-                            {s.location && <span className="text-slate-600">{s.location}</span>}
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <span className="text-slate-400">{formatNumber(s.qty)} {s.unit}</span>
-                            <span className="text-slate-600">{formatDate(s.received_at)}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-800 bg-slate-800/40 text-xs text-slate-400 font-medium">
+                      <th className="text-left px-4 py-2.5">Lot No.</th>
+                      <th className="text-left px-4 py-2.5">สินค้า / Size</th>
+                      <th className="text-left px-4 py-2.5">SO No.</th>
+                      <th className="text-right px-4 py-2.5 text-yellow-400">ม้วน</th>
+                      <th className="text-right px-4 py-2.5 text-green-400">KG</th>
+                      <th className="text-left px-4 py-2.5">ตำแหน่ง</th>
+                      <th className="text-left px-4 py-2.5">วันที่รับ</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800">
+                    {prodStock.map(s => {
+                      const so = s.planning_job?.sale_order
+                      const prod = so?.product ?? s.product
+                      const size = prod?.width && prod?.thickness ? `${prod.width}×${prod.thickness}` : null
+                      // หา rolls จาก production log
+                      const job = s.planning_job
+                      const log = logs?.find(l => l.planning_job_id === job?.id)
+                      const rolls = log?.good_rolls ?? null
+                      return (
+                        <tr key={s.id} className="hover:bg-slate-800/30 transition-colors">
+                          <td className="px-4 py-3">
+                            <span className="font-mono text-brand-300 font-semibold text-sm">{s.lot_no}</span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <p className="text-slate-200 text-sm">{prod?.part_name ?? '-'}</p>
+                            {size && <p className="text-slate-500 text-xs mt-0.5">{size} มิล</p>}
+                          </td>
+                          <td className="px-4 py-3 text-slate-400 text-sm">{so?.so_no ?? '-'}</td>
+                          <td className="px-4 py-3 text-right">
+                            {rolls
+                              ? <span className="text-yellow-300 font-semibold">{rolls.toLocaleString()} <span className="text-yellow-500/60 text-xs font-normal">ม้วน</span></span>
+                              : <span className="text-slate-600">—</span>}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <span className="text-green-300 font-semibold">{formatNumber(s.qty)}</span>
+                            <span className="text-green-500/60 text-xs ml-1">kg</span>
+                          </td>
+                          <td className="px-4 py-3 text-slate-500 text-xs">{s.location ?? '—'}</td>
+                          <td className="px-4 py-3 text-slate-500 text-xs whitespace-nowrap">{formatDate(s.received_at)}</td>
+                        </tr>
+                      )
+                    })}
+                    <tr className="bg-slate-800/60 border-t-2 border-slate-700 font-semibold text-sm">
+                      <td colSpan={3} className="px-4 py-2.5 text-slate-300">รวม</td>
+                      <td className="px-4 py-2.5 text-right text-yellow-300">
+                        {(() => { const t = prodStock.reduce((sum,s) => { const log = logs?.find(l=>l.planning_job_id===s.planning_job_id); return sum + (log?.good_rolls??0) },0); return t > 0 ? `${t.toLocaleString()} ม้วน` : '—' })()}
+                      </td>
+                      <td className="px-4 py-2.5 text-right text-green-300">{formatNumber(totalProdQty)} kg</td>
+                      <td colSpan={2} />
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
         )
       })()}
+
+      </> /* end production tab */}
+
+      {/* ══ TAB: old — สต็อกคลังเก่า ═════════════════════════════════ */}
+      {activeTab === 'old' && <>
 
       {/* ── สต็อกคลังเก่า (กรอกด้วยมือ) ──────────────────────────────────── */}
       {(() => {
@@ -942,37 +1091,73 @@ export default function Warehouse() {
                 </button>
               </div>
             ) : (
-              <div className="divide-y divide-amber-600/20">
-                {groups.map(g => (
-                  <div key={g.productName} className="px-5 py-3">
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-amber-200 text-sm font-semibold">{g.productName}</span>
-                      <div className="text-right">
-                        <span className="text-amber-300 font-bold text-sm">{formatNumber(g.totalQty)} {g.unit}</span>
-                        {g.lots.length > 1 && <span className="text-slate-500 text-xs ml-2">{g.lots.length} Lot</span>}
-                      </div>
-                    </div>
-                    <div className="space-y-0.5 pl-3 border-l-2 border-amber-700">
-                      {g.lots.map(s => (
-                        <div key={s.id} className="flex items-center justify-between text-xs">
-                          <div className="flex items-center gap-3">
-                            <span className="text-slate-500 font-mono">{s.lot_no}</span>
-                            {s.location && <span className="text-amber-700/80">{s.location}</span>}
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <span className="text-amber-300/80">{formatNumber(s.qty)} {s.unit}</span>
-                            <span className="text-slate-600">{formatDate(s.received_at)}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="border-b border-amber-600/20 bg-amber-500/5 text-xs text-amber-400/70 font-medium">
+                      <th className="text-left px-4 py-2.5">Lot No.</th>
+                      <th className="text-left px-4 py-2.5">สินค้า / Size</th>
+                      <th className="text-right px-4 py-2.5 text-yellow-400">ม้วน</th>
+                      <th className="text-right px-4 py-2.5 text-amber-300">KG</th>
+                      <th className="text-left px-4 py-2.5">ตำแหน่ง</th>
+                      <th className="text-left px-4 py-2.5">วันที่กรอก</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-amber-600/10">
+                    {oldStock.map(s => {
+                      const locParts = (s.location ?? '').split(' | ')
+                      const rollsPart = locParts.find(p => /^\d+ม้วน$/.test(p))
+                      const locPart   = locParts.filter(p => !/^\d+ม้วน$/.test(p)).join(' | ')
+                      const rolls = rollsPart ? parseInt(rollsPart) : null
+                      const prod = s.product
+                      const size = prod?.width && prod?.thickness ? `${prod.width}×${prod.thickness}` : null
+                      return (
+                        <tr key={s.id} className="hover:bg-amber-500/5 transition-colors">
+                          <td className="px-4 py-3">
+                            <span className="font-mono text-amber-300 font-semibold text-sm">{s.lot_no}</span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <p className="text-amber-100 text-sm">{prod?.part_name ?? '-'}</p>
+                            {size && <p className="text-amber-600/70 text-xs mt-0.5">{size} มิล</p>}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            {rolls
+                              ? <span className="text-yellow-300 font-semibold">{rolls.toLocaleString()} <span className="text-yellow-500/60 text-xs font-normal">ม้วน</span></span>
+                              : <span className="text-slate-600">—</span>}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <span className="text-amber-300 font-semibold">{formatNumber(s.qty)}</span>
+                            <span className="text-amber-500/60 text-xs ml-1">kg</span>
+                          </td>
+                          <td className="px-4 py-3 text-amber-600/70 text-xs">{locPart || '—'}</td>
+                          <td className="px-4 py-3 text-slate-500 text-xs whitespace-nowrap">{formatDate(s.received_at)}</td>
+                        </tr>
+                      )
+                    })}
+                    <tr className="bg-amber-500/10 border-t-2 border-amber-600/30 font-semibold text-sm">
+                      <td colSpan={2} className="px-4 py-2.5 text-amber-200">รวม</td>
+                      <td className="px-4 py-2.5 text-right text-yellow-300">
+                        {(() => {
+                          const t = oldStock.reduce((sum,s) => {
+                            const lp = (s.location??'').split(' | ')
+                            const rp = lp.find(p=>/^\d+ม้วน$/.test(p))
+                            return sum + (rp ? parseInt(rp) : 0)
+                          },0)
+                          return t > 0 ? `${t.toLocaleString()} ม้วน` : '—'
+                        })()}
+                      </td>
+                      <td className="px-4 py-2.5 text-right text-amber-300">{formatNumber(oldStock.reduce((s,i)=>s+i.qty,0))} kg</td>
+                      <td colSpan={2} />
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
         )
       })()}
+
+      </> /* end old tab */}
 
       {/* ── Manual Stock Modal ──────────────────────────────────────────── */}
       {showManualModal && (
@@ -1012,33 +1197,44 @@ export default function Warehouse() {
                 />
               </div>
 
-              {/* จำนวน + หน่วย */}
+              {/* KG + ม้วน */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">จำนวน <span className="text-red-400">*</span></label>
-                  <input
-                    type="number"
-                    value={mQty}
-                    onChange={e => setMQty(e.target.value)}
-                    placeholder="0"
-                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 outline-none focus:border-amber-500"
-                  />
+                  <label className="block text-xs text-slate-400 mb-1">น้ำหนัก (KG) <span className="text-red-400">*</span></label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      value={mQty}
+                      onChange={e => setMQty(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 pr-10 text-sm text-white placeholder-slate-500 outline-none focus:border-amber-500"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs">kg</span>
+                  </div>
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">หน่วย</label>
-                  <select
-                    value={mUnit}
-                    onChange={e => setMUnit(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-amber-500"
-                  >
-                    <option value="kg">kg</option>
-                    <option value="roll">ม้วน</option>
-                    <option value="meter">เมตร</option>
-                    <option value="sheet">แผ่น</option>
-                    <option value="piece">ชิ้น</option>
-                  </select>
+                  <label className="block text-xs text-slate-400 mb-1">จำนวนม้วน</label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      value={mRolls}
+                      onChange={e => setMRolls(e.target.value)}
+                      placeholder="0"
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 pr-12 text-sm text-white placeholder-slate-500 outline-none focus:border-amber-500"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs">ม้วน</span>
+                  </div>
                 </div>
               </div>
+
+              {/* preview */}
+              {(mQty || mRolls) && (
+                <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2 flex items-center gap-4 text-sm">
+                  {mQty && <span className="text-amber-200 font-bold">{parseFloat(mQty).toLocaleString()} <span className="text-amber-400/70 font-normal text-xs">kg</span></span>}
+                  {mQty && mRolls && <span className="text-slate-600">·</span>}
+                  {mRolls && <span className="text-amber-200 font-bold">{parseInt(mRolls).toLocaleString()} <span className="text-amber-400/70 font-normal text-xs">ม้วน</span></span>}
+                </div>
+              )}
 
               {/* ตำแหน่ง */}
               <div>
